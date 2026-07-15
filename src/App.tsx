@@ -43,10 +43,7 @@ function App() {
     const [waterInterval] = useLocalStorage<number>("carry_corner_water_interval", 45);
     const [eyeInterval] = useLocalStorage<number>("carry_corner_eye_interval", 20);
     const [audioEnabled, setAudioEnabled] = useLocalStorage<boolean>("carry_corner_audio_enabled", true);
-    const [notificationsEnabled, setNotificationsEnabled] = useLocalStorage<boolean>(
-        "carry_corner_notifications_enabled",
-        false,
-    );
+    const [notificationsEnabled] = useLocalStorage<boolean>("carry_corner_notifications_enabled", false);
 
     // --- RUNTIME STATES ---
     const [sessionSeconds, setSessionSeconds] = useState(0);

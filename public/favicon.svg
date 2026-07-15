@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+    <defs>
+        <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#22d3ee" />
+            <stop offset="100%" stop-color="#0284c7" />
+        </linearGradient>
+        <linearGradient id="indigoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#c084fc" />
+            <stop offset="100%" stop-color="#6366f1" />
+        </linearGradient>
+    </defs>
+    
+    <!-- Outer corner path (representing the "Carry Corner" frame) -->
+    <path d="M 6 26 L 6 14 C 6 9.58 9.58 6 14 6 L 26 6" stroke="url(#cyanGrad)" stroke-width="4" stroke-linecap="round" />
+    
+    <!-- Inner concentric rings/target (representing the focus & screen tracking) -->
+    <circle cx="19" cy="19" r="6" stroke="url(#indigoGrad)" stroke-width="3" />
+    <circle cx="19" cy="19" r="2" fill="#22d3ee" />
+</svg>

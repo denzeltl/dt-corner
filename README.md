@@ -1,4 +1,4 @@
-# DT Corner — Desk Health & Focus Tracker
+# DT Corner — Desk Screen & Productivity Tracker
 
 DT Corner is a desktop screen and productivity tracker built as a modern web application. It helps you stay healthy and focused by managing work session timing, sit-stand posture switching, hydration goals, eye strain breaks, daily supplement reminders, and focus pomodoros — complete with a late-night lockdown mode to prevent burnout.
 
@@ -6,9 +6,9 @@ DT Corner is a desktop screen and productivity tracker built as a modern web app
 
 ## 📸 Screenshot
 
-|                      Dashboard                      |                      Lockdown Mode                      |
-| :-------------------------------------------------------------: | :-------------------------------------------------------------: |
-| ![Dashboard Screen](./public/dt-corner-dashboard.png) | ![Lockdown Screen](./public/dt-corner-lockdown.png) |
+|                       Dashboard                       |                   Lockdown Mode                    |
+| :---------------------------------------------------: | :------------------------------------------------: |
+| ![Dashboard Screen](./public/dt-corner-dashboard.png) | ![Lockdown Screen](./public/dt-corner-lockout.png) |
 
 ---
 
@@ -71,4 +71,4 @@ DT Corner is a desktop screen and productivity tracker built as a modern web app
 ## 📝 TODO Section
 
 - [ ] **Weekly & Monthly Health Reports:** Provide exportable productivity and posture summaries.
-- [ ] **Detailed Weekly Charts:** Instead of one bar, make multiple bars for hours and mins. 
+- [ ] **Detailed Weekly Charts:** Instead of one bar, make multiple bars for hours and mins.

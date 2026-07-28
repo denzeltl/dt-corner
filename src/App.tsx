@@ -25,36 +25,39 @@ function App() {
     const [time, setTime] = useState(new Date());
 
     // --- PERSISTED APP STATES ---
-    const [isTimedIn, setIsTimedIn] = useLocalStorage<boolean>("carry_corner_is_timed_in", false);
-    const [dailyLogs, setDailyLogs] = useLocalStorage<Record<string, number>>("carry_corner_daily_logs", {});
-    const [dailyFocusLogs, setDailyFocusLogs] = useLocalStorage<Record<string, number>>("carry_corner_focus_logs", {});
-    const [waterCount, setWaterCount] = useLocalStorage<number>("carry_corner_water_count", 0);
+    const [isTimedIn, setIsTimedIn] = useLocalStorage<boolean>("dt_corner_is_timed_in", false);
+    const [dailyLogs, setDailyLogs] = useLocalStorage<Record<string, number>>("dt_corner_daily_logs", {});
+    const [dailyFocusLogs, setDailyFocusLogs] = useLocalStorage<Record<string, number>>("dt_corner_focus_logs", {});
+    const [waterCount, setWaterCount] = useLocalStorage<number>("dt_corner_water_count", 0);
     const [lastWaterResetDate, setLastWaterResetDate] = useLocalStorage<string>(
-        "carry_corner_last_water_reset",
+        "dt_corner_last_water_reset",
         getTodayKey(),
     );
-    const [magnesiumTaken, setMagnesiumTaken] = useLocalStorage<boolean>("carry_corner_magnesium_taken", false);
+    const [magnesiumTaken, setMagnesiumTaken] = useLocalStorage<boolean>("dt_corner_magnesium_taken", false);
     const [lastMagnesiumResetDate, setLastMagnesiumResetDate] = useLocalStorage<string>(
-        "carry_corner_last_magnesium_reset",
+        "dt_corner_last_magnesium_reset",
         getTodayKey(),
     );
 
     // --- REMINDER CONFIGURATION ---
-    const [waterInterval] = useLocalStorage<number>("carry_corner_water_interval", 45);
-    const [eyeInterval] = useLocalStorage<number>("carry_corner_eye_interval", 20);
-    const [audioEnabled, setAudioEnabled] = useLocalStorage<boolean>("carry_corner_audio_enabled", true);
-    const [notificationsEnabled] = useLocalStorage<boolean>("carry_corner_notifications_enabled", false);
+    const [waterInterval] = useLocalStorage<number>("dt_corner_water_interval", 45);
+    const [eyeInterval] = useLocalStorage<number>("dt_corner_eye_interval", 20);
+    const [audioEnabled, setAudioEnabled] = useLocalStorage<boolean>("dt_corner_audio_enabled", true);
+    const [notificationsEnabled, setNotificationsEnabled] = useLocalStorage<boolean>(
+        "dt_corner_notifications_enabled",
+        false,
+    );
 
     // --- RUNTIME STATES ---
     const [sessionSeconds, setSessionSeconds] = useState(0);
     const [currentStandingState, setCurrentStandingState] = useState<"sitting" | "standing">("sitting");
     // Pomodoro focus timer states
     const [focusState, setFocusState] = useLocalStorage<"idle" | "running" | "paused" | "completed">(
-        "carry_corner_focus_state",
+        "dt_corner_focus_state",
         "idle",
     );
-    const [isBreak, setIsBreak] = useLocalStorage<boolean>("carry_corner_is_break", false);
-    const [focusTimer, setFocusTimer] = useLocalStorage<number>("carry_corner_focus_timer", FOCUS_DURATION);
+    const [isBreak, setIsBreak] = useLocalStorage<boolean>("dt_corner_is_break", false);
+    const [focusTimer, setFocusTimer] = useLocalStorage<number>("dt_corner_focus_timer", FOCUS_DURATION);
 
     // Remaining seconds for timers
     // Sit/stand timer starts at sitting duration
@@ -112,21 +115,21 @@ function App() {
     };
 
     // Request browser Notification Permission
-    // const requestNotificationPermission = () => {
-    //     if (!("Notification" in window)) {
-    //         alert("This browser does not support desktop notifications.");
-    //         return;
-    //     }
-    //     Notification.requestPermission().then((permission) => {
-    //         if (permission === "granted") {
-    //             setNotificationsEnabled(true);
-    //             sendNotification("Notifications Enabled", "You will receive reminders from Screen Time Hub!");
-    //             if (audioEnabled) playSuccess();
-    //         } else {
-    //             setNotificationsEnabled(false);
-    //         }
-    //     });
-    // };
+    const requestNotificationPermission = () => {
+        if (!("Notification" in window)) {
+            alert("This browser does not support desktop notifications.");
+            return;
+        }
+        Notification.requestPermission().then((permission) => {
+            if (permission === "granted") {
+                setNotificationsEnabled(true);
+                sendNotification("Notifications Enabled", "You will receive reminders from Screen Time Hub!");
+                if (audioEnabled) playSuccess();
+            } else {
+                setNotificationsEnabled(false);
+            }
+        });
+    };
 
     // Main Core Tick Loop (runs every second)
     useEffect(() => {
@@ -507,11 +510,10 @@ function App() {
                                 {/* Session toggle */}
                                 <button
                                     onClick={handleTimeToggle}
-                                    className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all duration-300 cursor-pointer border h-12 ${
-                                        isTimedIn
+                                    className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all duration-300 cursor-pointer border h-12 ${isTimedIn
                                             ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/40 shadow-[0_0_15px_rgba(16,185,129,0.15)] hover:bg-emerald-500/20"
                                             : "bg-zinc-950/65 text-zinc-400 border-zinc-800 hover:border-zinc-700 hover:text-zinc-200"
-                                    }`}
+                                        }`}
                                 >
                                     <div className="flex items-center gap-2">
                                         {isTimedIn ? (
@@ -540,17 +542,16 @@ function App() {
                                     <button
                                         onClick={handleFocusClick}
                                         disabled={!isTimedIn}
-                                        className={`flex-grow flex items-center justify-between px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all duration-300 border h-12 ${
-                                            !isTimedIn
+                                        className={`flex-grow flex items-center justify-between px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all duration-300 border h-12 ${!isTimedIn
                                                 ? "bg-zinc-900/40 text-zinc-400 border-zinc-800/70 cursor-not-allowed opacity-70"
                                                 : focusState === "running"
-                                                  ? "cursor-pointer bg-indigo-500/10 text-indigo-400 border-indigo-500/40 shadow-[0_0_15px_rgba(99,102,241,0.15)] hover:bg-indigo-500/20"
-                                                  : focusState === "paused"
-                                                    ? "cursor-pointer bg-amber-500/10 text-amber-400 border-amber-500/40 hover:bg-amber-500/20"
-                                                    : focusState === "completed"
-                                                      ? "cursor-pointer bg-rose-500/10 text-rose-400 border-rose-500/40 animate-pulse hover:bg-rose-500/20 shadow-[0_0_15px_rgba(244,63,94,0.15)]"
-                                                      : "cursor-pointer bg-zinc-950/65 text-zinc-400 border-zinc-800 hover:border-zinc-700 hover:text-zinc-200"
-                                        }`}
+                                                    ? "cursor-pointer bg-indigo-500/10 text-indigo-400 border-indigo-500/40 shadow-[0_0_15px_rgba(99,102,241,0.15)] hover:bg-indigo-500/20"
+                                                    : focusState === "paused"
+                                                        ? "cursor-pointer bg-amber-500/10 text-amber-400 border-amber-500/40 hover:bg-amber-500/20"
+                                                        : focusState === "completed"
+                                                            ? "cursor-pointer bg-rose-500/10 text-rose-400 border-rose-500/40 animate-pulse hover:bg-rose-500/20 shadow-[0_0_15px_rgba(244,63,94,0.15)]"
+                                                            : "cursor-pointer bg-zinc-950/65 text-zinc-400 border-zinc-800 hover:border-zinc-700 hover:text-zinc-200"
+                                            }`}
                                     >
                                         <div className="flex items-center gap-2">
                                             {focusState === "running" ? (
@@ -572,14 +573,14 @@ function App() {
                                                 {focusState === "idle"
                                                     ? "Start Focus"
                                                     : focusState === "running"
-                                                      ? isBreak
-                                                          ? "Break Active"
-                                                          : "Focusing"
-                                                      : focusState === "paused"
-                                                        ? "Paused"
-                                                        : isBreak
-                                                          ? "Take Focus"
-                                                          : "Take Break"}
+                                                        ? isBreak
+                                                            ? "Break Active"
+                                                            : "Focusing"
+                                                        : focusState === "paused"
+                                                            ? "Paused"
+                                                            : isBreak
+                                                                ? "Take Focus"
+                                                                : "Take Break"}
                                             </span>
                                         </div>
                                         {focusState !== "idle" && (
@@ -595,11 +596,10 @@ function App() {
                                             onClick={handleFocusReset}
                                             disabled={!isTimedIn}
                                             title="Reset Focus Timer"
-                                            className={`px-3 py-2.5 rounded-xl border transition-all duration-300 flex items-center justify-center h-12 ${
-                                                !isTimedIn
+                                            className={`px-3 py-2.5 rounded-xl border transition-all duration-300 flex items-center justify-center h-12 ${!isTimedIn
                                                     ? "border-zinc-800/60 bg-zinc-950/40 text-zinc-700 cursor-not-allowed opacity-50"
                                                     : "cursor-pointer border-zinc-800 bg-zinc-950/65 text-zinc-400 hover:text-rose-400 hover:border-rose-500/40 hover:bg-rose-500/5"
-                                            }`}
+                                                }`}
                                         >
                                             <RotateCcw size={12} />
                                         </button>
@@ -750,11 +750,10 @@ function App() {
                             {/* Pose Switch Card */}
                             <button
                                 onClick={toggleStandingState}
-                                className={`w-full flex items-center justify-between p-2 rounded-lg border text-left transition-all duration-300 cursor-pointer ${
-                                    sitStandAlert
+                                className={`w-full flex items-center justify-between p-2 rounded-lg border text-left transition-all duration-300 cursor-pointer ${sitStandAlert
                                         ? "bg-amber-500/10 border-amber-500/50 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.15)] animate-pulse"
                                         : "bg-zinc-950/65 border-zinc-800 hover:border-zinc-700 text-zinc-300"
-                                }`}
+                                    }`}
                             >
                                 <div className="flex items-center gap-2">
                                     <span className="text-sm w-4 text-center">
@@ -777,11 +776,10 @@ function App() {
                             {/* Eye Rest Card */}
                             <button
                                 onClick={() => resetTimer("eye")}
-                                className={`w-full flex items-center justify-between p-2 rounded-lg border text-left transition-all duration-300 cursor-pointer ${
-                                    eyeAlert
+                                className={`w-full flex items-center justify-between p-2 rounded-lg border text-left transition-all duration-300 cursor-pointer ${eyeAlert
                                         ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.15)] animate-pulse"
                                         : "bg-zinc-950/65 border-zinc-800 hover:border-zinc-700 text-zinc-300"
-                                }`}
+                                    }`}
                             >
                                 <div className="flex items-center gap-2">
                                     <span className="text-xs w-4 text-center">👁️</span>
@@ -800,11 +798,10 @@ function App() {
                             {/* Hydration Tracker Card */}
                             <button
                                 onClick={incrementWater}
-                                className={`w-full flex items-center justify-between p-2 rounded-lg border text-left transition-all duration-300 cursor-pointer ${
-                                    waterAlert
+                                className={`w-full flex items-center justify-between p-2 rounded-lg border text-left transition-all duration-300 cursor-pointer ${waterAlert
                                         ? "bg-cyan-500/10 border-cyan-500/50 text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.15)] animate-pulse"
                                         : "bg-zinc-950/65 border-zinc-800 text-zinc-300"
-                                }`}
+                                    }`}
                             >
                                 <div className="flex items-center gap-2">
                                     <span className="text-sm w-4 text-center">💧</span>
@@ -838,19 +835,17 @@ function App() {
                                 </button>
                             ) : (
                                 <div
-                                    className={`w-full flex items-center justify-between p-2 rounded-lg border text-left transition-all duration-300 cursor-not-allowed ${
-                                        magnesiumTaken
+                                    className={`w-full flex items-center justify-between p-2 rounded-lg border text-left transition-all duration-300 cursor-not-allowed ${magnesiumTaken
                                             ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.15)]"
                                             : "bg-zinc-900/40 border-zinc-800/70 text-zinc-400 opacity-80"
-                                    }`}
+                                        }`}
                                 >
                                     <div className="flex items-center gap-2 flex-grow text-left outline-none">
                                         <span className="text-xs w-4 text-center opacity-70">💊</span>
                                         <div>
                                             <div
-                                                className={`text-xs font-bold uppercase tracking-wider leading-none ${
-                                                    magnesiumTaken ? "text-emerald-400" : "text-zinc-500"
-                                                }`}
+                                                className={`text-xs font-bold uppercase tracking-wider leading-none ${magnesiumTaken ? "text-emerald-400" : "text-zinc-500"
+                                                    }`}
                                             >
                                                 Magnesium
                                             </div>
@@ -860,11 +855,10 @@ function App() {
                                         </div>
                                     </div>
                                     <div
-                                        className={`font-mono text-xs font-bold px-2 py-0.5 rounded border ${
-                                            magnesiumTaken
+                                        className={`font-mono text-xs font-bold px-2 py-0.5 rounded border ${magnesiumTaken
                                                 ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
                                                 : "bg-zinc-950/70 border-zinc-800/80 text-zinc-500"
-                                        }`}
+                                            }`}
                                     >
                                         {magnesiumTaken ? "--" : "11pm"}
                                     </div>
@@ -873,7 +867,7 @@ function App() {
                         </div>
 
                         {/* Bottom util strip */}
-                        {/* <div className="mt-2 pt-1.5 border-t border-zinc-800/40 flex items-center justify-between">
+                        <div className="mt-2 pt-1.5 border-t border-zinc-800/40 flex items-center justify-between">
                             <button
                                 onClick={requestNotificationPermission}
                                 className={`text-[8px] font-bold transition-colors cursor-pointer ${notificationsEnabled ? "text-indigo-400" : "text-zinc-500 hover:text-zinc-300"}`}
@@ -907,9 +901,9 @@ function App() {
                                             setFocusState("idle");
                                             setIsBreak(false);
                                             setFocusTimer(FOCUS_DURATION);
-                                            window.localStorage.removeItem("carry_corner_daily_logs");
-                                            window.localStorage.removeItem("carry_corner_focus_logs");
-                                            window.localStorage.removeItem("carry_corner_water_count");
+                                            window.localStorage.removeItem("dt_corner_daily_logs");
+                                            window.localStorage.removeItem("dt_corner_focus_logs");
+                                            window.localStorage.removeItem("dt_corner_water_count");
                                         }
                                     }}
                                     className="text-[8px] text-zinc-500 hover:text-rose-400 transition-colors cursor-pointer font-bold"
@@ -917,7 +911,7 @@ function App() {
                                     🗑️ Reset
                                 </button>
                             </div>
-                        </div> */}
+                        </div>
                     </div>
                 </div>
             </main>

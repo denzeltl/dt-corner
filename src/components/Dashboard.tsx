@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { 
+import {
   Sliders, Bell, Sparkles, Trash2, CheckCircle
 } from 'lucide-react';
 
@@ -7,7 +7,7 @@ interface DashboardProps {
   isTimedIn: boolean;
   dailyLogs: Record<string, number>;
   setDailyLogs: (logs: Record<string, number> | ((prev: Record<string, number>) => Record<string, number>)) => void;
-  
+
   // Settings & Setters
   sitStandInterval: number;
   setSitStandInterval: (val: number) => void;
@@ -15,14 +15,14 @@ interface DashboardProps {
   setWaterInterval: (val: number) => void;
   eyeInterval: number;
   setEyeInterval: (val: number) => void;
-  
+
   notificationsEnabled: boolean;
   requestNotificationPermission: () => void;
-  
+
   // Test Functions
   triggerTestReminder: (type: 'sitStand' | 'water' | 'eye' | 'magnesium') => void;
   triggerTestMidnight: () => void;
-  
+
   // Data actions
   waterCount: number;
   resetWater: () => void;
@@ -51,17 +51,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const getPastSevenDays = () => {
     const days = [];
     const weekdayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    
+
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
-      
+
       const year = d.getFullYear();
       const month = (d.getMonth() + 1).toString().padStart(2, '0');
       const date = d.getDate().toString().padStart(2, '0');
       const dateKey = `${year}-${month}-${date}`;
       const dayName = weekdayNames[d.getDay()];
-      
+
       days.push({
         key: dateKey,
         label: i === 0 ? 'Today' : `${dayName} ${d.getDate()}`,
@@ -79,7 +79,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // Find max value in logs for scale, minimum 120 minutes (2 hrs) to keep structure visible
   const maxMinutes = Math.max(...chartData.map(d => d.minutes), 120);
-  
+
   // Chart dimensions
   const chartWidth = 520;
   const chartHeight = 150;
@@ -126,15 +126,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
     if (window.confirm('Are you sure you want to clear all screen time and activity logs? This cannot be undone.')) {
       setDailyLogs({});
       resetWater();
-      window.localStorage.removeItem('carry_corner_daily_logs');
-      window.localStorage.removeItem('carry_corner_water_count');
+      window.localStorage.removeItem('dt_corner_daily_logs');
+      window.localStorage.removeItem('dt_corner_water_count');
     }
   };
 
   return (
     <div className="w-full glass-panel border-t-0 border-x-0 overflow-hidden transition-all duration-300">
       <div className="max-w-6xl mx-auto px-6 py-5 grid grid-cols-1 lg:grid-cols-12 gap-6">
-        
+
         {/* LEFT COLUMN: Screen Time Charts (7 columns) */}
         <div className="lg:col-span-7 bg-zinc-900/40 border border-zinc-800/60 rounded-xl p-4 flex flex-col justify-between">
           <div className="flex items-center justify-between mb-2">
@@ -164,8 +164,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
           {/* SVG Custom Chart */}
           <div className="relative w-full h-[160px] flex items-center justify-center mt-2">
-            <svg 
-              viewBox={`0 0 ${chartWidth} ${chartHeight}`} 
+            <svg
+              viewBox={`0 0 ${chartWidth} ${chartHeight}`}
               className="w-full h-full text-zinc-600"
             >
               <defs>
@@ -193,18 +193,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 const hrsVal = Math.round((maxMinutes * ratio) / 60);
                 return (
                   <g key={index}>
-                    <line 
-                      x1={paddingLeft} 
-                      y1={y} 
-                      x2={chartWidth - paddingRight} 
-                      y2={y} 
-                      stroke="rgba(63, 63, 70, 0.25)" 
+                    <line
+                      x1={paddingLeft}
+                      y1={y}
+                      x2={chartWidth - paddingRight}
+                      y2={y}
+                      stroke="rgba(63, 63, 70, 0.25)"
                       strokeDasharray="2 3"
                     />
-                    <text 
-                      x={paddingLeft - 8} 
-                      y={y + 3} 
-                      textAnchor="end" 
+                    <text
+                      x={paddingLeft - 8}
+                      y={y + 3}
+                      textAnchor="end"
                       className="fill-zinc-500 font-mono text-[9px] font-medium"
                     >
                       {hrsVal}h
@@ -221,17 +221,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 const isHovered = hoveredBarIndex === index;
 
                 return (
-                  <g 
-                    key={d.key} 
+                  <g
+                    key={d.key}
                     onMouseEnter={() => setHoveredBarIndex(index)}
                     onMouseLeave={() => setHoveredBarIndex(null)}
                     className="cursor-pointer"
                   >
                     {/* Background hover highlights */}
                     <rect
-                      x={x - barSpacing/3}
+                      x={x - barSpacing / 3}
                       y={paddingTop}
-                      width={barWidth + barSpacing * 2/3}
+                      width={barWidth + barSpacing * 2 / 3}
                       height={graphHeight + 5}
                       fill="transparent"
                     />
@@ -252,7 +252,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     {isHovered && (
                       <g>
                         <rect
-                          x={x + barWidth/2 - 40}
+                          x={x + barWidth / 2 - 40}
                           y={y - 20}
                           width="80"
                           height="16"
@@ -262,7 +262,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                           strokeWidth="0.5"
                         />
                         <text
-                          x={x + barWidth/2}
+                          x={x + barWidth / 2}
                           y={y - 9}
                           textAnchor="middle"
                           className="fill-zinc-200 font-mono font-bold text-[8px]"
@@ -277,9 +277,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       x={x + barWidth / 2}
                       y={chartHeight - 8}
                       textAnchor="middle"
-                      className={`fill-zinc-500 font-sans text-[9px] font-semibold transition-colors ${
-                        isHovered ? 'fill-zinc-100' : ''
-                      }`}
+                      className={`fill-zinc-500 font-sans text-[9px] font-semibold transition-colors ${isHovered ? 'fill-zinc-100' : ''
+                        }`}
                     >
                       {d.label}
                     </text>
@@ -296,7 +295,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5 mb-3">
               <Sliders size={13} className="text-zinc-500" /> Reminder Options
             </h2>
-            
+
             <div className="space-y-3.5">
               {/* Sit/Stand Interval */}
               <div>
@@ -373,11 +372,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </h2>
             <button
               onClick={requestNotificationPermission}
-              className={`w-full py-1 px-2.5 rounded text-[10px] font-bold tracking-wider transition-all duration-300 flex items-center justify-center gap-1.5 cursor-pointer ${
-                notificationsEnabled
+              className={`w-full py-1 px-2.5 rounded text-[10px] font-bold tracking-wider transition-all duration-300 flex items-center justify-center gap-1.5 cursor-pointer ${notificationsEnabled
                   ? 'bg-zinc-800 text-zinc-400 border border-zinc-700 hover:bg-zinc-700/50'
                   : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-500/20'
-              }`}
+                }`}
             >
               {notificationsEnabled ? (
                 <>

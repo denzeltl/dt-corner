@@ -48,14 +48,14 @@ export const LockdownScreen: React.FC<LockdownScreenProps> = ({
     // Cooldown countdown timer
     // useEffect(() => {
     //     if (cooldownRemaining <= 0) return;
-    // 
+    //
     //     const timer = setInterval(() => {
     //         setCooldownRemaining((prev) => prev - 1);
     //     }, 1000);
-    // 
+    //
     //     return () => clearInterval(timer);
     // }, [cooldownRemaining]);
-    // 
+    //
     // const handleBypassSubmit = (e: React.FormEvent) => {
     //     e.preventDefault();
     //     if (bypassInput.trim() === targetPhrase) {

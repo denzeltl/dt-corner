@@ -4,13 +4,11 @@ DT Corner is a desktop screen and productivity tracker built as a modern web app
 
 ---
 
-## 📸 Screenshots
+## 📸 Screenshot
 
-_Below are screenshots of DT Corner in action._
-
-|                      Dashboard & Analytics                      |                    Active Status Bar & Timers                    |                      Bedtime Lockdown Mode                      |
-| :-------------------------------------------------------------: | :--------------------------------------------------------------: | :-------------------------------------------------------------: |
-| ![Dashboard Screen](./public/dt-corner-dashboard.png) | ![Status Screen](./public/dt-corner-status.png) | ![Lockdown Screen](./public/dt-corner-lockdown.png) |
+|                      Dashboard                      |                      Lockdown Mode                      |
+| :-------------------------------------------------------------: | :-------------------------------------------------------------: |
+| ![Dashboard Screen](./public/dt-corner-dashboard.png) | ![Lockdown Screen](./public/dt-corner-lockdown.png) |
 
 ---
 

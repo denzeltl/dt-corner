@@ -72,3 +72,4 @@ DT Corner is a desktop screen and productivity tracker built as a modern web app
 
 - [ ] **Weekly & Monthly Health Reports:** Provide exportable productivity and posture summaries.
 - [ ] **Detailed Weekly Charts:** Instead of one bar, make multiple bars for hours and mins.
+- [ ] **Automated Monitoring:** Auto log in and log out based on inactivity.

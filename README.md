@@ -2,6 +2,8 @@
 
 DT Corner is a desktop screen and productivity tracker built as a modern web application. It helps you stay healthy and focused by managing work session timing, sit-stand posture switching, hydration goals, eye strain breaks, daily supplement reminders, and focus pomodoros — complete with a late-night lockdown mode to prevent burnout.
 
+View project [here](https://dt-corner.vercel.app/)
+
 ---
 
 ## 📸 Screenshot

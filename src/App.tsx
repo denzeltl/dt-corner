@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { LockdownScreen } from "./components/LockdownScreen";
 import { useLocalStorage } from "./hooks/useLocalStorage";
+import { useSystemIdle } from "./hooks/useSystemIdle";
 import { playChime, playSuccess } from "./utils/audio";
 import { Play, Pause, RotateCcw, Settings, Volume2, VolumeX, Bell, BellOff, Sparkles } from "lucide-react";
 
@@ -47,6 +48,14 @@ function App() {
         "dt_corner_notifications_enabled",
         false,
     );
+    const [autoTrackingEnabled, setAutoTrackingEnabled] = useLocalStorage<boolean>(
+        "dt_corner_auto_tracking_enabled",
+        false,
+    );
+    const [autoTrackingMinutes, setAutoTrackingMinutes] = useLocalStorage<number>(
+        "dt_corner_auto_tracking_minutes",
+        10,
+    );
 
     // --- RUNTIME STATES ---
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -79,6 +88,9 @@ function App() {
     const [lockdownActive, setLockdownActive] = useState(false);
     const [lockdownBypassUntil, setLockdownBypassUntil] = useState<number | null>(null);
     const [testLockdownActive, setTestLockdownActive] = useState(false);
+    // A manual time-out stays off until the computer has first been idle again.
+    const [autoTrackingArmed, setAutoTrackingArmed] = useState(true);
+    const { available: systemIdleAvailable, idleSeconds: systemIdleSeconds } = useSystemIdle();
 
     // Update Clock every second
     useEffect(() => {
@@ -101,22 +113,109 @@ function App() {
     }, [eyeInterval]);
 
     // Helper to trigger standard notification (push + audio)
-    const sendNotification = (title: string, body: string, soundType: "chime" | "success" = "chime") => {
-        if (notificationsEnabled && "Notification" in window && Notification.permission === "granted") {
-            try {
-                new Notification(title, { body });
-            } catch (err) {
-                console.warn("Notification failed:", err);
+    const sendNotification = useCallback(
+        (title: string, body: string, soundType: "chime" | "success" = "chime") => {
+            if (notificationsEnabled) {
+                if ("__TAURI_INTERNALS__" in window) {
+                    void import("@tauri-apps/plugin-notification")
+                        .then(({ sendNotification: sendNativeNotification }) => {
+                            sendNativeNotification({ title, body });
+                        })
+                        .catch((error) => console.warn("Native notification failed:", error));
+                } else if ("Notification" in window && Notification.permission === "granted") {
+                    try {
+                        new Notification(title, { body });
+                    } catch (err) {
+                        console.warn("Notification failed:", err);
+                    }
+                }
             }
+            if (audioEnabled) {
+                if (soundType === "chime") playChime();
+                else if (soundType === "success") playSuccess();
+            }
+        },
+        [audioEnabled, notificationsEnabled],
+    );
+
+    // Computer-wide activity monitor. This uses the Windows last-input timestamp supplied by
+    // the Tauri shell, so activity in other applications counts too.
+    useEffect(() => {
+        if (!autoTrackingEnabled || !systemIdleAvailable || systemIdleSeconds === null) return;
+
+        const inactivityLimitSeconds = autoTrackingMinutes * 60;
+        if (systemIdleSeconds >= inactivityLimitSeconds) {
+            setAutoTrackingArmed(true);
+            if (isTimedIn) {
+                setIsTimedIn(false);
+                setFocusState("idle");
+                setIsBreak(false);
+                setFocusTimer(FOCUS_DURATION);
+                sendNotification("Timed Out", `No computer activity for ${autoTrackingMinutes} minutes.`);
+            }
+            return;
         }
-        if (audioEnabled) {
-            if (soundType === "chime") playChime();
-            else if (soundType === "success") playSuccess();
+
+        // A session begins only after activity follows an armed state. This prevents a manual
+        // time-out from being immediately reversed while the user is still at the computer.
+        if (autoTrackingArmed && systemIdleSeconds <= 60 && !isTimedIn) {
+            setIsTimedIn(true);
+            setSessionSeconds(0);
+            setSitStandTimer(currentStandingState === "sitting" ? SITTING_DURATION : STANDING_DURATION);
+            setWaterTimer(waterInterval * 60);
+            setEyeTimer(eyeInterval * 60);
+            setSitStandAlert(false);
+            setWaterAlert(false);
+            setEyeAlert(false);
+            setAutoTrackingArmed(false);
+            sendNotification("Timed In", "Computer activity detected. Tracking started automatically.", "success");
         }
-    };
+    }, [
+        autoTrackingArmed,
+        autoTrackingEnabled,
+        autoTrackingMinutes,
+        currentStandingState,
+        eyeInterval,
+        isTimedIn,
+        sendNotification,
+        setFocusState,
+        setFocusTimer,
+        setIsBreak,
+        setIsTimedIn,
+        systemIdleAvailable,
+        systemIdleSeconds,
+        waterInterval,
+    ]);
 
     // Request browser Notification Permission
-    const requestNotificationPermission = () => {
+    const requestNotificationPermission = async () => {
+        if ("__TAURI_INTERNALS__" in window) {
+            try {
+                const {
+                    isPermissionGranted,
+                    requestPermission: requestNativePermission,
+                    sendNotification: sendNativeNotification,
+                } = await import("@tauri-apps/plugin-notification");
+                const permissionGranted = (await isPermissionGranted()) || (await requestNativePermission()) === "granted";
+
+                setNotificationsEnabled(permissionGranted);
+                if (permissionGranted) {
+                    sendNativeNotification({
+                        title: "Alerts Enabled",
+                        body: "You will receive reminders from DT Corner.",
+                    });
+                    if (audioEnabled) playSuccess();
+                } else {
+                    alert("Windows notifications were not allowed. Enable them in Windows Settings, then try again.");
+                }
+            } catch (error) {
+                console.warn("Native notification permission failed:", error);
+                setNotificationsEnabled(false);
+                alert("Could not enable Windows notifications. Rebuild and reinstall the desktop app, then try again.");
+            }
+            return;
+        }
+
         if (!("Notification" in window)) {
             alert("This browser does not support desktop notifications.");
             return;
@@ -318,6 +417,7 @@ function App() {
             setEyeAlert(false);
             // sendNotification("Session Started", "Screen time monitoring is now active.", "success");
         } else {
+            setAutoTrackingArmed(false);
             handleFocusReset();
             // sendNotification("Session Ended", "Screen time monitoring is deactivated.", "success");
         }
@@ -538,6 +638,19 @@ function App() {
                                         </span>
                                     )}
                                 </button>
+
+                                {autoTrackingEnabled && (
+                                    <div className="flex items-center justify-between px-2 text-[10px] text-cyan-300/80">
+                                        <span>
+                                            {systemIdleAvailable
+                                                ? `Auto tracking · time out after ${autoTrackingMinutes}m idle`
+                                                : "Auto tracking requires the desktop app"}
+                                        </span>
+                                        {systemIdleAvailable && systemIdleSeconds !== null && (
+                                            <span className="font-mono text-zinc-500">Idle {Math.floor(systemIdleSeconds / 60)}m</span>
+                                        )}
+                                    </div>
+                                )}
 
                                 {/* Focus Pomodoro Button Container */}
                                 <div className="flex gap-2 w-full">
@@ -923,6 +1036,44 @@ function App() {
                                             {notificationsEnabled ? "ON" : "OFF"}
                                         </span>
                                     </button>
+
+                                    {/* Computer-wide Windows idle detection */}
+                                    <button
+                                        onClick={() => {
+                                            setAutoTrackingEnabled(!autoTrackingEnabled);
+                                            setAutoTrackingArmed(true);
+                                        }}
+                                        disabled={!systemIdleAvailable && !autoTrackingEnabled}
+                                        className={`col-span-2 flex items-center justify-between px-2 py-1.5 rounded border transition-all font-bold ${
+                                            autoTrackingEnabled
+                                                ? "bg-cyan-500/10 border-cyan-500/30 text-cyan-300 cursor-pointer"
+                                                : systemIdleAvailable
+                                                  ? "bg-zinc-900/60 border-zinc-800 text-zinc-500 hover:text-zinc-300 cursor-pointer"
+                                                  : "bg-zinc-900/30 border-zinc-800/60 text-zinc-600 cursor-not-allowed"
+                                        }`}
+                                        title="Use computer-wide keyboard and mouse activity to start and stop tracking"
+                                    >
+                                        <span>Auto tracking</span>
+                                        <span className="font-mono text-[10px]">
+                                            {autoTrackingEnabled ? "ON" : systemIdleAvailable ? "OFF" : "DESKTOP ONLY"}
+                                        </span>
+                                    </button>
+
+                                    {autoTrackingEnabled && systemIdleAvailable && (
+                                        <label className="col-span-2 flex items-center justify-between px-2 py-1.5 rounded border border-zinc-800 bg-zinc-900/60 text-zinc-400 font-bold">
+                                            <span>Auto time out</span>
+                                            <select
+                                                value={autoTrackingMinutes}
+                                                onChange={(event) => setAutoTrackingMinutes(Number(event.target.value))}
+                                                className="bg-zinc-950 border border-zinc-800 rounded px-1 py-0.5 text-[10px] text-zinc-300 outline-none"
+                                            >
+                                                <option value={5}>5 min idle</option>
+                                                <option value={10}>10 min idle</option>
+                                                <option value={15}>15 min idle</option>
+                                                <option value={30}>30 min idle</option>
+                                            </select>
+                                        </label>
+                                    )}
 
                                     {/* Mock Data Button */}
                                     <button

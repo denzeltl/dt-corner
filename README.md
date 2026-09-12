@@ -23,6 +23,7 @@ DT Corner is a desktop screen and productivity tracker built as a modern web app
 - **Bedtime Lockdown Mode:** Restrictive screen activated after 12 AM to discourage late-night work overload and enforce proper rest habits.
 - **Web Audio & Push Notifications:** Synthesized audio cues via Web Audio API alongside optional browser push notifications.
 - **Local-First Persistence:** Complete data persistence using `localStorage` — no login or backend service required.
+- **Desktop Auto Tracking:** In the Windows desktop build, an opt-in system idle monitor can time in after activity and time out after a configurable period without keyboard or mouse input. It reads only the idle duration, never keys, mouse coordinates, or active app names.
 
 ---
 
@@ -65,6 +66,16 @@ DT Corner is a desktop screen and productivity tracker built as a modern web app
     ```
 
     Open [http://localhost:5173](http://localhost:5173) in your browser to see the application.
+
+### Windows desktop app
+
+The browser version cannot inspect activity outside its own tab. The bundled desktop version uses Windows' system idle timestamp, so work in any desktop application counts as activity.
+
+1. Install the [Rust MSVC toolchain](https://www.rust-lang.org/tools/install) and the **Desktop development with C++** workload from Visual Studio Build Tools.
+2. Start the desktop app with `npm run tauri dev`.
+3. Open **Settings** and turn on **Auto tracking**. Choose the idle time-out period (5–30 minutes).
+
+Use `npm run tauri build` to create an installer. The desktop app must be running to monitor activity; it does not record input content, screen contents, or which applications are open.
 
 ---
 

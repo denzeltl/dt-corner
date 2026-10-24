@@ -42,7 +42,9 @@ The desktop version can time you in and out on its own when you stop using your 
 2. Run `npm run tauri dev`.
 3. In **Settings**, turn on **Auto tracking**.
 
-Run `npm run tauri build` to make an installer.
+To make an installer, run `npm run tauri build`. You'll find it in `src-tauri\target\release\bundle\nsis\` (a `setup.exe`) or `...\bundle\msi\`. Double-click it to install.
+
+> If PowerShell says "running scripts is disabled", use `npm.cmd` instead of `npm`.
 
 ## Built with
 

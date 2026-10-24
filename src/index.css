@@ -1,81 +1,175 @@
 @import "tailwindcss";
 
+/* Landscape screens 1024px+ get three columns. Portrait (a vertical monitor) keeps the two-column stack. */
+@custom-variant wide (@media (min-width: 1024px) and (orientation: landscape));
+/* Wide, short screens (a desk strip, e.g. 1056x340): three compact columns that fill the viewport height. */
+@custom-variant strip (@media (min-width: 1024px) and (orientation: landscape) and (max-height: 760px));
+/* Full-screen vertical monitors: the two-column stack stretches to fill the height. */
+@custom-variant tall (@media (orientation: portrait) and (min-width: 900px) and (min-height: 1400px));
+
+/* Tokens mirror DESIGN.md. */
+@theme {
+  --color-night: #0b1020;
+  --color-surface: #141a30;
+  --color-surface-2: #1b2240;
+  --color-line: #273055;
+  --color-ink: #eef0f7;
+  --color-muted: #a3abc8;
+  --color-faint: #6d76a0;
+  --color-sun: #ffb36b;
+  --color-sun-ink: #24130a;
+  --color-rose: #ff7a8a;
+  --color-sea: #7cc4ff;
+  --color-focus: #b9a4ff;
+  --color-success: #7ee0a8;
+  --color-danger: #ff6b7a;
+
+  --font-display: "Fraunces Variable", Georgia, serif;
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", monospace;
+
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+
+  --animate-pop: pop 240ms var(--ease-out);
+  --animate-rise: rise 400ms var(--ease-out) both;
+  --animate-fade-up: fade-up 400ms var(--ease-out) both;
+
+  @keyframes pop {
+    0% { transform: scale(1); }
+    40% { transform: scale(1.12); }
+    100% { transform: scale(1); }
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(12px) scale(0.98); }
+    to { opacity: 1; transform: none; }
+  }
+}
+
 @layer base {
   :root {
     color-scheme: dark;
   }
 
+  html,
   body {
-    background-color: #09090b;
-    /* zinc-950 */
-    color: #f4f4f5;
-    /* zinc-100 */
-    font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+    background-color: var(--color-night);
+  }
+
+  body {
+    margin: 0;
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    margin: 0;
-    padding: 0;
     overflow-x: hidden;
   }
 
-  /* Custom scrollbars */
+  body.is-locked {
+    overflow: hidden;
+  }
+
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 8px;
+    height: 8px;
   }
-
   ::-webkit-scrollbar-track {
-    background: #09090b;
+    background: var(--color-night);
   }
-
   ::-webkit-scrollbar-thumb {
-    background: #27272a;
+    background: var(--color-line);
     border-radius: 9999px;
   }
+}
 
-  ::-webkit-scrollbar-thumb:hover {
-    background: #3f3f46;
+@layer components {
+  .card {
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: 22px;
+  }
+
+  /* Interaction floor for every pressable control: lift on hover, settle on press, ring on focus. */
+  .press {
+    outline: 2px solid transparent;
+    outline-offset: 6px;
+    transition:
+      transform 160ms var(--ease-out),
+      background-color 160ms var(--ease-out),
+      border-color 160ms var(--ease-out),
+      color 160ms var(--ease-out),
+      outline-offset 160ms var(--ease-out),
+      outline-color 160ms var(--ease-out);
+  }
+  .press:focus-visible {
+    outline-color: var(--color-sun);
+    outline-offset: 3px;
+  }
+  .press:not(:disabled):active {
+    transform: scale(0.97);
+    transition-duration: 100ms;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .press:not(:disabled):hover {
+      transform: translateY(-1px);
+    }
+    .press:not(:disabled):active {
+      transform: scale(0.97);
+    }
+  }
+
+  .chip {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1;
+    padding: 6px 9px;
+    border-radius: 8px;
+    background-color: rgb(11 16 32 / 0.7);
+    border: 1px solid var(--color-line);
+    white-space: nowrap;
+  }
+
+  .tnum {
+    font-variant-numeric: tabular-nums;
   }
 }
 
-/* Glassmorphism utilities */
-.glass-panel {
-  background-color: rgba(24, 24, 27, 0.65);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(63, 63, 70, 0.4);
-}
-
-.glass-panel-light {
-  background-color: rgba(24, 24, 27, 0.4);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(63, 63, 70, 0.25);
-}
-
-/* Floating moon particle animations */
-@keyframes float-slow {
-
-  0%,
-  100% {
-    transform: translateY(0px) scale(1);
-    opacity: 0.2;
-  }
-
-  50% {
-    transform: translateY(-20px) scale(1.1);
-    opacity: 0.6;
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
 
-.animate-float-1 {
-  animation: float-slow 8s ease-in-out infinite;
+/* Settings sheet: slides up from the bottom on phones, fades up in the centre on larger screens. */
+dialog.settings-sheet[open] {
+  animation: sheet-up 280ms var(--ease-out);
 }
-
-.animate-float-2 {
-  animation: float-slow 12s ease-in-out infinite 2s;
+dialog.settings-sheet[open]::backdrop {
+  animation: backdrop-in 200ms ease-out;
 }
-
-.animate-float-3 {
-  animation: float-slow 16s ease-in-out infinite 4s;
+@media (min-width: 640px) {
+  dialog.settings-sheet[open] {
+    animation: var(--animate-fade-up);
+  }
+}
+@keyframes sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: none; }
+}
+@keyframes backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }

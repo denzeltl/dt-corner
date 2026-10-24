@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DT Corner brand</title>
+<link rel="icon" type="image/svg+xml" href="../public/favicon.svg">
+<style>
+  :root { --night:#0b1020; --surface:#141a30; --line:#273055; --ink:#eef0f7; --muted:#a3abc8; --sun:#ffb36b; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--night); color: var(--ink); font: 16px/1.55 "Inter", system-ui, sans-serif; }
+  main { max-width: 960px; margin: 0 auto; padding: 56px 20px 80px; display: grid; gap: 48px; }
+  h1 { font: 600 40px/1.1 "Fraunces", Georgia, serif; margin: 0; letter-spacing: -0.02em; }
+  h2 { font: 600 22px/1.2 "Fraunces", Georgia, serif; margin: 0 0 6px; }
+  p { margin: 0; color: var(--muted); max-width: 62ch; }
+  .row { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 16px; }
+  .tile { flex: 1 1 260px; border: 1px solid var(--line); border-radius: 14px; padding: 28px; display: grid; place-items: center; min-height: 140px; }
+  .tile.light { background: #f4f1ea; }
+  .tile.night { background: var(--surface); }
+  .tile img { max-width: 100%; height: auto; }
+  .clear { outline: 1px dashed var(--sun); outline-offset: 16px; }
+  .sizes { display: flex; align-items: end; gap: 20px; }
+  .sw { flex: 1 1 140px; border-radius: 12px; border: 1px solid var(--line); overflow: hidden; }
+  .sw div { height: 72px; }
+  .sw span { display: block; padding: 10px 12px; font: 13px/1.4 ui-monospace, monospace; color: var(--muted); }
+  code { font: 14px ui-monospace, monospace; color: var(--sun); }
+  ul { margin: 8px 0 0; padding-left: 20px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>DT Corner brand</h1>
+    <p>The mark is a corner of the evening sky seen through a window frame: the sun sets behind the hills as the day runs down toward the bedtime lockout. Full direction and tokens live in <code>DESIGN.md</code>.</p>
+  </header>
+
+  <section>
+    <h2>Logo</h2>
+    <p>Use <code>logo.svg</code> on night grounds, <code>logo-inverse.svg</code> on light grounds, and <code>logo-mono.svg</code> where only one colour can print (it takes <code>currentColor</code>). Keep clear space equal to the bracket's inset (about a quarter of the mark's height) on every side.</p>
+    <div class="row">
+      <div class="tile night"><img class="clear" src="logo.svg" width="290" height="64" alt="DT Corner logo on night"></div>
+      <div class="tile light"><img class="clear" src="logo-inverse.svg" width="290" height="64" alt="DT Corner logo on light"></div>
+      <div class="tile light"><img src="logo-mono.svg" width="290" height="64" alt="DT Corner one-colour logo"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Mark and minimum size</h2>
+    <p>The mark alone (<code>mark.svg</code>) is for app icons and avatars. Below 24px, use <code>favicon.svg</code>, which has a thicker bracket and a larger sun. Never go below 16px.</p>
+    <div class="row">
+      <div class="tile night sizes">
+        <img src="mark.svg" width="96" height="96" alt="">
+        <img src="mark.svg" width="48" height="48" alt="">
+        <img src="../public/favicon.svg" width="32" height="32" alt="">
+        <img src="../public/favicon.svg" width="16" height="16" alt="">
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Palette</h2>
+    <div class="row">
+      <div class="sw"><div style="background:#0b1020"></div><span>night #0b1020<br>background</span></div>
+      <div class="sw"><div style="background:#141a30"></div><span>surface #141a30<br>cards</span></div>
+      <div class="sw"><div style="background:#eef0f7"></div><span>ink #eef0f7<br>text</span></div>
+      <div class="sw"><div style="background:#ffb36b"></div><span>sun #ffb36b<br>now, today, due</span></div>
+      <div class="sw"><div style="background:#7cc4ff"></div><span>sea #7cc4ff<br>screen time</span></div>
+      <div class="sw"><div style="background:#b9a4ff"></div><span>focus #b9a4ff<br>focus time</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Type</h2>
+    <p>Fraunces (600) for the clock, big numbers and headings. Inter for interface text. JetBrains Mono for countdowns, with tabular figures.</p>
+  </section>
+
+  <section>
+    <h2>Files</h2>
+    <ul>
+      <li><code>public/favicon.svg</code>, <code>public/favicon.ico</code> (16, 32, 48)</li>
+      <li><code>public/apple-touch-icon.png</code> (180), <code>public/icon-192.png</code>, <code>public/icon-512.png</code>, <code>public/icon-maskable-512.png</code></li>
+      <li><code>public/og-image.png</code> (1200×630 social preview), <code>public/site.webmanifest</code></li>
+      <li><code>brand/app-icon-1024.png</code>: source for the desktop app icons. Run <code>npm run tauri icon brand/app-icon-1024.png</code>.</li>
+    </ul>
+  </section>
+</main>
+</body>
+</html>

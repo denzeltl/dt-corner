@@ -1,48 +1,74 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ClockCard } from "./components/ClockCard";
 import { LockdownScreen } from "./components/LockdownScreen";
+import { RemindersCard } from "./components/RemindersCard";
+import { SettingsSheet } from "./components/SettingsSheet";
+import { WeekCard } from "./components/WeekCard";
 import { useLocalStorage } from "./hooks/useLocalStorage";
 import { useSystemIdle } from "./hooks/useSystemIdle";
 import { playChime, playSuccess } from "./utils/audio";
-import { Play, Pause, RotateCcw, Settings, Volume2, VolumeX, Bell, BellOff, Sparkles } from "lucide-react";
+import {
+    BREAK_DURATION,
+    FOCUS_DURATION,
+    MAGNESIUM_HOUR,
+    SITTING_DURATION,
+    STANDING_DURATION,
+    type FocusState,
+    type Posture,
+} from "./utils/config";
+import { getDateKey, isLockoutHour } from "./utils/time";
 
-// Pose durations (seconds)
-const SITTING_DURATION = 25 * 60; // 25 minutes
-const STANDING_DURATION = 15 * 60; // 15 minutes
-// Pomodoro focus and break durations
-const FOCUS_DURATION = 25 * 60; // 25 minutes focus
-const BREAK_DURATION = 5 * 60; // 5 minutes break
+// An auto time-out followed by activity within this window resumes the same session.
+const RESUME_WINDOW_MS = 4 * 60 * 60 * 1000;
+// Gaps longer than this between ticks (sleep, hibernate) are not counted as screen time.
+const MAX_TICK_GAP_SECONDS = 90;
 
-// Helper to get today's key string YYYY-MM-DD in local time
-const getTodayKey = () => {
-    const d = new Date();
-    const year = d.getFullYear();
-    const month = (d.getMonth() + 1).toString().padStart(2, "0");
-    const date = d.getDate().toString().padStart(2, "0");
-    return `${year}-${month}-${date}`;
+/** Countdowns for the current session, persisted so a reload does not lose them. */
+type SessionTimers = {
+    elapsed: number;
+    posture: number;
+    water: number;
+    eye: number;
 };
 
-function App() {
-    // --- CLOCK STATES ---
-    const [time, setTime] = useState(new Date());
+const freshTimers = (posture: Posture, waterMins: number, eyeMins: number): SessionTimers => ({
+    elapsed: 0,
+    posture: posture === "sitting" ? SITTING_DURATION : STANDING_DURATION,
+    water: waterMins * 60,
+    eye: eyeMins * 60,
+});
 
-    // --- PERSISTED APP STATES ---
+const addMinutes = (logs: Record<string, number>, key: string, seconds: number) => ({
+    ...logs,
+    [key]: Math.max(0, +((logs[key] || 0) + seconds / 60).toFixed(4)),
+});
+
+function App() {
+    const [now, setNow] = useState(() => new Date());
+    const todayKey = getDateKey(now);
+
+    // --- PERSISTED DATA ---
     const [isTimedIn, setIsTimedIn] = useLocalStorage<boolean>("dt_corner_is_timed_in", false);
     const [dailyLogs, setDailyLogs] = useLocalStorage<Record<string, number>>("dt_corner_daily_logs", {});
     const [dailyFocusLogs, setDailyFocusLogs] = useLocalStorage<Record<string, number>>("dt_corner_focus_logs", {});
     const [waterCount, setWaterCount] = useLocalStorage<number>("dt_corner_water_count", 0);
-    const [lastWaterResetDate, setLastWaterResetDate] = useLocalStorage<string>(
-        "dt_corner_last_water_reset",
-        getTodayKey(),
-    );
+    const [lastWaterResetDate, setLastWaterResetDate] = useLocalStorage<string>("dt_corner_last_water_reset", todayKey);
     const [magnesiumTaken, setMagnesiumTaken] = useLocalStorage<boolean>("dt_corner_magnesium_taken", false);
     const [lastMagnesiumResetDate, setLastMagnesiumResetDate] = useLocalStorage<string>(
         "dt_corner_last_magnesium_reset",
-        getTodayKey(),
+        todayKey,
     );
+    const [posture, setPosture] = useLocalStorage<Posture>("dt_corner_posture", "sitting");
+    const [focusState, setFocusState] = useLocalStorage<FocusState>("dt_corner_focus_state", "idle");
+    const [isBreak, setIsBreak] = useLocalStorage<boolean>("dt_corner_is_break", false);
+    const [focusTimer, setFocusTimer] = useLocalStorage<number>("dt_corner_focus_timer", FOCUS_DURATION);
+    // When the computer went idle before an automatic time-out. Activity soon after resumes the session.
+    const [autoPausedAt, setAutoPausedAt] = useLocalStorage<number | null>("dt_corner_auto_paused_at", null);
 
-    // --- REMINDER CONFIGURATION ---
-    const [waterInterval] = useLocalStorage<number>("dt_corner_water_interval", 45);
-    const [eyeInterval] = useLocalStorage<number>("dt_corner_eye_interval", 20);
+    // --- SETTINGS ---
+    const [waterInterval, setWaterInterval] = useLocalStorage<number>("dt_corner_water_interval", 45);
+    const [eyeInterval, setEyeInterval] = useLocalStorage<number>("dt_corner_eye_interval", 20);
+    const [lockoutHour, setLockoutHour] = useLocalStorage<number>("dt_corner_lockout_hour", 0);
     const [audioEnabled, setAudioEnabled] = useLocalStorage<boolean>("dt_corner_audio_enabled", true);
     const [notificationsEnabled, setNotificationsEnabled] = useLocalStorage<boolean>(
         "dt_corner_notifications_enabled",
@@ -57,74 +83,34 @@ function App() {
         10,
     );
 
-    // --- RUNTIME STATES ---
-    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-    const [sessionSeconds, setSessionSeconds] = useState(0);
-    const [currentStandingState, setCurrentStandingState] = useState<"sitting" | "standing">("sitting");
-    // Pomodoro focus timer states
-    const [focusState, setFocusState] = useLocalStorage<"idle" | "running" | "paused" | "completed">(
-        "dt_corner_focus_state",
-        "idle",
+    const [timers, setTimers] = useLocalStorage<SessionTimers>(
+        "dt_corner_session_timers",
+        freshTimers("sitting", waterInterval, eyeInterval),
     );
-    const [isBreak, setIsBreak] = useLocalStorage<boolean>("dt_corner_is_break", false);
-    const [focusTimer, setFocusTimer] = useLocalStorage<number>("dt_corner_focus_timer", FOCUS_DURATION);
 
-    // Remaining seconds for timers
-    // Sit/stand timer starts at sitting duration
-    const [sitStandTimer, setSitStandTimer] = useState(SITTING_DURATION);
-    const [waterTimer, setWaterTimer] = useState(waterInterval * 60);
-    const [eyeTimer, setEyeTimer] = useState(eyeInterval * 60);
-
-    // Active alerts (glowing/notified)
-    const [sitStandAlert, setSitStandAlert] = useState(false);
-    const [waterAlert, setWaterAlert] = useState(false);
-    const [eyeAlert, setEyeAlert] = useState(false);
-    const [magnesiumAlert, setMagnesiumAlert] = useState(false);
-
-    // Avoid duplicate push notifications for same event
-    const notifiedEvents = useRef<Record<string, boolean>>({});
-
-    // --- LOCKDOWN STATES ---
-    const [lockdownActive, setLockdownActive] = useState(false);
-    const [lockdownBypassUntil, setLockdownBypassUntil] = useState<number | null>(null);
-    const [testLockdownActive, setTestLockdownActive] = useState(false);
+    // --- RUNTIME ---
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [previewLockout, setPreviewLockout] = useState(false);
+    const [notificationError, setNotificationError] = useState<string | null>(null);
     // A manual time-out stays off until the computer has first been idle again.
     const [autoTrackingArmed, setAutoTrackingArmed] = useState(true);
     const { available: systemIdleAvailable, idleSeconds: systemIdleSeconds } = useSystemIdle();
+    const notifiedRef = useRef<Record<string, string>>({});
+    const lastTickRef = useRef(Date.now());
 
-    // Update Clock every second
-    useEffect(() => {
-        const clockTimer = setInterval(() => {
-            setTime(new Date());
-        }, 1000);
-        return () => clearInterval(clockTimer);
-    }, []);
+    const lockdownActive = isLockoutHour(now.getHours(), lockoutHour) || previewLockout;
 
-    // Sync Timer limits when water/eye intervals change
-
-    useEffect(() => {
-        setWaterTimer(waterInterval * 60);
-        setWaterAlert(false);
-    }, [waterInterval]);
-
-    useEffect(() => {
-        setEyeTimer(eyeInterval * 60);
-        setEyeAlert(false);
-    }, [eyeInterval]);
-
-    // Helper to trigger standard notification (push + audio)
+    // --- NOTIFICATIONS ---
     const sendNotification = useCallback(
         (title: string, body: string, soundType: "chime" | "success" = "chime") => {
             if (notificationsEnabled) {
                 if ("__TAURI_INTERNALS__" in window) {
                     void import("@tauri-apps/plugin-notification")
-                        .then(({ sendNotification: sendNativeNotification }) => {
-                            sendNativeNotification({ title, body });
-                        })
+                        .then(({ sendNotification: sendNativeNotification }) => sendNativeNotification({ title, body }))
                         .catch((error) => console.warn("Native notification failed:", error));
                 } else if ("Notification" in window && Notification.permission === "granted") {
                     try {
-                        new Notification(title, { body });
+                        new Notification(title, { body, icon: "/icon-192.png" });
                     } catch (err) {
                         console.warn("Notification failed:", err);
                     }
@@ -132,1019 +118,426 @@ function App() {
             }
             if (audioEnabled) {
                 if (soundType === "chime") playChime();
-                else if (soundType === "success") playSuccess();
+                else playSuccess();
             }
         },
         [audioEnabled, notificationsEnabled],
     );
 
-    // Computer-wide activity monitor. This uses the Windows last-input timestamp supplied by
-    // the Tauri shell, so activity in other applications counts too.
-    useEffect(() => {
-        if (!autoTrackingEnabled || !systemIdleAvailable || systemIdleSeconds === null) return;
+    /** Fire a notification once per key per day. */
+    const notifyOnce = useCallback(
+        (key: string, title: string, body: string, soundType: "chime" | "success" = "chime") => {
+            const stamp = getDateKey();
+            if (notifiedRef.current[key] === stamp) return;
+            notifiedRef.current[key] = stamp;
+            sendNotification(title, body, soundType);
+        },
+        [sendNotification],
+    );
 
-        const inactivityLimitSeconds = autoTrackingMinutes * 60;
-        if (systemIdleSeconds >= inactivityLimitSeconds) {
-            setAutoTrackingArmed(true);
-            if (isTimedIn) {
-                setIsTimedIn(false);
-                setFocusState("idle");
-                setIsBreak(false);
-                setFocusTimer(FOCUS_DURATION);
-                sendNotification("Timed Out", `No computer activity for ${autoTrackingMinutes} minutes.`);
-            }
-            return;
-        }
-
-        // A session begins only after activity follows an armed state. This prevents a manual
-        // time-out from being immediately reversed while the user is still at the computer.
-        if (autoTrackingArmed && systemIdleSeconds <= 60 && !isTimedIn) {
-            setIsTimedIn(true);
-            setSessionSeconds(0);
-            setSitStandTimer(currentStandingState === "sitting" ? SITTING_DURATION : STANDING_DURATION);
-            setWaterTimer(waterInterval * 60);
-            setEyeTimer(eyeInterval * 60);
-            setSitStandAlert(false);
-            setWaterAlert(false);
-            setEyeAlert(false);
-            setAutoTrackingArmed(false);
-            sendNotification("Timed In", "Computer activity detected. Tracking started automatically.", "success");
-        }
-    }, [
-        autoTrackingArmed,
-        autoTrackingEnabled,
-        autoTrackingMinutes,
-        currentStandingState,
-        eyeInterval,
-        isTimedIn,
-        sendNotification,
-        setFocusState,
-        setFocusTimer,
-        setIsBreak,
-        setIsTimedIn,
-        systemIdleAvailable,
-        systemIdleSeconds,
-        waterInterval,
-    ]);
-
-    // Request browser Notification Permission
     const requestNotificationPermission = async () => {
+        setNotificationError(null);
         if ("__TAURI_INTERNALS__" in window) {
             try {
-                const {
-                    isPermissionGranted,
-                    requestPermission: requestNativePermission,
-                    sendNotification: sendNativeNotification,
-                } = await import("@tauri-apps/plugin-notification");
-                const permissionGranted = (await isPermissionGranted()) || (await requestNativePermission()) === "granted";
-
-                setNotificationsEnabled(permissionGranted);
-                if (permissionGranted) {
-                    sendNativeNotification({
-                        title: "Alerts Enabled",
-                        body: "You will receive reminders from DT Corner.",
-                    });
+                const { isPermissionGranted, requestPermission, sendNotification: sendNative } = await import(
+                    "@tauri-apps/plugin-notification"
+                );
+                const granted = (await isPermissionGranted()) || (await requestPermission()) === "granted";
+                setNotificationsEnabled(granted);
+                if (granted) {
+                    sendNative({ title: "Alerts on", body: "DT Corner will remind you here." });
                     if (audioEnabled) playSuccess();
                 } else {
-                    alert("Windows notifications were not allowed. Enable them in Windows Settings, then try again.");
+                    setNotificationError("Windows blocked notifications. Allow them in Windows Settings, then try again.");
                 }
             } catch (error) {
                 console.warn("Native notification permission failed:", error);
                 setNotificationsEnabled(false);
-                alert("Could not enable Windows notifications. Rebuild and reinstall the desktop app, then try again.");
+                setNotificationError("Couldn't turn on Windows notifications. Reinstall the desktop app and try again.");
             }
             return;
         }
 
         if (!("Notification" in window)) {
-            alert("This browser does not support desktop notifications.");
+            setNotificationError("This browser can't show desktop notifications.");
             return;
         }
-        Notification.requestPermission().then((permission) => {
-            if (permission === "granted") {
-                setNotificationsEnabled(true);
-                sendNotification("Notifications Enabled", "You will receive reminders from Screen Time Hub!");
-                if (audioEnabled) playSuccess();
-            } else {
-                setNotificationsEnabled(false);
-            }
-        });
+        const permission = await Notification.requestPermission();
+        if (permission === "granted") {
+            setNotificationsEnabled(true);
+            new Notification("Alerts on", { body: "DT Corner will remind you here.", icon: "/icon-192.png" });
+            if (audioEnabled) playSuccess();
+        } else {
+            setNotificationsEnabled(false);
+            setNotificationError("Notifications are blocked for this site. Allow them in your browser's site settings.");
+        }
     };
 
-    // Main Core Tick Loop (runs every second)
-    useEffect(() => {
-        const tick = setInterval(() => {
-            const now = new Date();
-            const currentHrs = now.getHours();
-            const todayKey = getTodayKey();
+    // --- SESSION CONTROL ---
 
-            // 1. Check Date Transitions (Reset daily records)
-            // Reset daily focus logs if date changed
-            if (todayKey !== lastWaterResetDate) {
-                // water reset handled elsewhere
-            }
-            if (todayKey !== lastMagnesiumResetDate) {
-                // magnesium reset handled elsewhere
-            }
-            // Reset focus logs on new day
-            if (todayKey !== getTodayKey()) {
-                setDailyFocusLogs((prev) => {
-                    const newLogs = { ...prev };
-                    // optional cleanup, keep as is
-                    return newLogs;
-                });
-            }
+    /** Time in. Resumes the paused session when the time-out was automatic and recent. */
+    const timeIn = useCallback(
+        (source: "manual" | "auto") => {
+            const resumable =
+                autoPausedAt !== null &&
+                getDateKey(new Date(autoPausedAt)) === getDateKey() &&
+                Date.now() - autoPausedAt < RESUME_WINDOW_MS;
 
-            // 2. Bedtime Lockout evaluation
-            if (todayKey !== lastWaterResetDate) {
-                setWaterCount(0);
-                setLastWaterResetDate(todayKey);
-            }
-            if (todayKey !== lastMagnesiumResetDate) {
-                setMagnesiumTaken(false);
-                setLastMagnesiumResetDate(todayKey);
-                setMagnesiumAlert(false);
-                notifiedEvents.current["magnesium"] = false;
-            }
-
-            // 2. Bedtime Lockout evaluation
-            const isMidnightTime = currentHrs === 0;
-            const isCircadianLockout = isMidnightTime || (currentHrs >= 1 && currentHrs < 5);
-
-            // Reset test lockdown after normal lockout period ends
-            if (!isCircadianLockout && testLockdownActive) {
-                setTestLockdownActive(false);
-            }
-
-            const isBypassed = lockdownBypassUntil !== null && Date.now() < lockdownBypassUntil;
-
-            const shouldLock = (isCircadianLockout || testLockdownActive) && !isBypassed;
-            setLockdownActive(shouldLock);
-
-            if (shouldLock && isTimedIn) {
-                if (!notifiedEvents.current["bedtime"]) {
-                    notifiedEvents.current["bedtime"] = true;
-                    sendNotification("Bedtime", "Lockout active, time out for the day.", "chime");
-                }
+            if (resumable) {
+                // Being away from the screen counts as an eye break; every other timer carries on.
+                setTimers((t) => ({ ...t, eye: eyeInterval * 60 }));
+                if (focusState === "paused" && source === "auto") setFocusState("running");
             } else {
-                notifiedEvents.current["bedtime"] = false;
+                setTimers(freshTimers(posture, waterInterval, eyeInterval));
             }
+            setAutoPausedAt(null);
+            setIsTimedIn(true);
+            lastTickRef.current = Date.now();
 
-            // 3. Screen Time accumulation & reminders (if Timed In)
-            if (isTimedIn && !lockdownActive) {
-                setSessionSeconds((prev) => prev + 1);
-
-                setDailyLogs((prev) => {
-                    const currentMinsLogged = prev[todayKey] || 0;
-                    return {
-                        ...prev,
-                        [todayKey]: +(currentMinsLogged + 1 / 60).toFixed(4),
-                    };
-                });
-                // Increment focus logs when focus timer is active/completed and in focus mode (not on break)
-                const isFocusing = (focusState === "running" || focusState === "completed") && !isBreak;
-                if (isFocusing) {
-                    setDailyFocusLogs((prev) => {
-                        const currentMins = prev[todayKey] || 0;
-                        return {
-                            ...prev,
-                            [todayKey]: +(currentMins + 1 / 60).toFixed(4),
-                        };
-                    });
-                }
-
-                // A. Sit / Stand Timer
-                setSitStandTimer((prev) => {
-                    if (prev <= 1) {
-                        if (!sitStandAlert) {
-                            setSitStandAlert(true);
-                            const targetPose = currentStandingState === "sitting" ? "standing" : "sitting";
-                            sendNotification("Posture Change", `Time to switch to ${targetPose}!`);
-                        }
-                        return 0;
-                    }
-                    return prev - 1;
-                });
-
-                // B. Water Timer
-                setWaterTimer((prev) => {
-                    if (prev <= 1) {
-                        if (!waterAlert) {
-                            setWaterAlert(true);
-                            sendNotification("Hydration", "Time to take a sip of water.");
-                        }
-                        return 0;
-                    }
-                    return prev - 1;
-                });
-
-                // C. Eye Rest Timer
-                setEyeTimer((prev) => {
-                    if (prev <= 1) {
-                        if (!eyeAlert) {
-                            setEyeAlert(true);
-                            sendNotification("Eye Rest", "Look 20 feet away for 20 seconds!");
-                        }
-                        return 0;
-                    }
-                    return prev - 1;
-                });
-
-                // D. Magnesium Reminder (at 11:00 PM)
-                const isElevenPM = currentHrs === 23;
-                if (isElevenPM && !magnesiumTaken) {
-                    setMagnesiumAlert(true);
-                    if (!notifiedEvents.current["magnesium"]) {
-                        sendNotification("Magnesium", "Don't forget to take your Magnesium supplement!");
-                        notifiedEvents.current["magnesium"] = true;
-                    }
-                } else {
-                    setMagnesiumAlert(false);
-                }
+            if (source === "auto") {
+                sendNotification(
+                    resumable ? "Welcome back" : "Timed in",
+                    resumable ? "Picked up your session where you left it." : "Activity detected. Tracking started.",
+                    "success",
+                );
+            } else if (audioEnabled) {
+                playChime();
             }
-            // Focus Pomodoro Timer handling
+        },
+        [
+            audioEnabled,
+            autoPausedAt,
+            eyeInterval,
+            focusState,
+            posture,
+            sendNotification,
+            setAutoPausedAt,
+            setFocusState,
+            setIsTimedIn,
+            setTimers,
+            waterInterval,
+        ],
+    );
+
+    const resetFocus = useCallback(() => {
+        setFocusState("idle");
+        setIsBreak(false);
+        setFocusTimer(FOCUS_DURATION);
+    }, [setFocusState, setIsBreak, setFocusTimer]);
+
+    const timeOutManually = () => {
+        setIsTimedIn(false);
+        setAutoPausedAt(null);
+        setAutoTrackingArmed(false);
+        resetFocus();
+        if (audioEnabled) playChime();
+    };
+
+    // Computer-wide activity monitor (desktop app only). Uses the Windows last-input timestamp, so
+    // activity in any application counts.
+    useEffect(() => {
+        if (!autoTrackingEnabled || !systemIdleAvailable || systemIdleSeconds === null) return;
+
+        const limit = autoTrackingMinutes * 60;
+        if (systemIdleSeconds >= limit) {
+            setAutoTrackingArmed(true);
+            if (!isTimedIn) return;
+
+            // Time out at the moment activity stopped: the idle stretch was not screen time, so give it back.
+            const idle = systemIdleSeconds;
+            const wasFocusing = focusState === "running" && !isBreak;
+            setIsTimedIn(false);
+            setAutoPausedAt(Date.now() - idle * 1000);
+            setTimers((t) => ({
+                ...t,
+                elapsed: Math.max(0, t.elapsed - idle),
+                posture: Math.min(posture === "sitting" ? SITTING_DURATION : STANDING_DURATION, t.posture + idle),
+                water: Math.min(waterInterval * 60, t.water + idle),
+            }));
+            setDailyLogs((logs) => addMinutes(logs, getDateKey(), -idle));
+            if (wasFocusing) setDailyFocusLogs((logs) => addMinutes(logs, getDateKey(), -idle));
             if (focusState === "running") {
-                setFocusTimer((prev) => {
-                    if (prev <= 1) {
-                        // Timer finished
-                        setFocusState("completed");
-                        if (isBreak) {
-                            sendNotification("Break Over", "Back to focus!", "success");
-                        } else {
-                            sendNotification("Focus Complete", "Time for a short break.", "chime");
-                        }
-                        return 0;
-                    }
-                    return prev - 1;
-                });
-            } else if (focusState === "completed") {
-                setFocusTimer((prev) => prev - 1);
+                setFocusState("paused");
+                setFocusTimer((t) => Math.min(isBreak ? BREAK_DURATION : FOCUS_DURATION, t + idle));
             }
-        }, 1000);
+            sendNotification("Timed out", `No activity for ${autoTrackingMinutes} minutes. Move the mouse to pick up again.`);
+            return;
+        }
 
-        return () => clearInterval(tick);
+        // A session begins only after activity follows an armed state, so a manual time-out is not
+        // immediately reversed while you are still at the computer.
+        if (autoTrackingArmed && systemIdleSeconds <= 60 && !isTimedIn && !lockdownActive) {
+            setAutoTrackingArmed(false);
+            timeIn("auto");
+        }
     }, [
-        isTimedIn,
-        lockdownActive,
-        lockdownBypassUntil,
-        testLockdownActive,
-        currentStandingState,
-        sitStandAlert,
-        waterAlert,
-        eyeAlert,
-        magnesiumTaken,
-        lastWaterResetDate,
-        lastMagnesiumResetDate,
+        autoTrackingArmed,
+        autoTrackingEnabled,
+        autoTrackingMinutes,
         focusState,
         isBreak,
-        FOCUS_DURATION,
-        BREAK_DURATION,
+        isTimedIn,
+        lockdownActive,
+        posture,
+        sendNotification,
+        setAutoPausedAt,
+        setDailyFocusLogs,
+        setDailyLogs,
+        setFocusState,
+        setFocusTimer,
+        setIsTimedIn,
+        setTimers,
+        systemIdleAvailable,
+        systemIdleSeconds,
+        timeIn,
+        waterInterval,
     ]);
 
+    // --- TICK ---
+    // One interval; the latest render's closure is read through a ref so the interval never restarts.
+    // Elapsed time comes from the wall clock, so throttled background tabs still count correctly.
+    const tick = () => {
+        const current = new Date();
+        const nowMs = current.getTime();
+        let seconds = Math.floor((nowMs - lastTickRef.current) / 1000);
+        if (seconds < 1) return;
+        lastTickRef.current += seconds * 1000;
+        if (seconds > MAX_TICK_GAP_SECONDS) {
+            lastTickRef.current = nowMs;
+            seconds = 0;
+        }
+        setNow(current);
+        const dayKey = getDateKey(current);
+
+        // Daily resets
+        if (dayKey !== lastWaterResetDate) {
+            setWaterCount(0);
+            setLastWaterResetDate(dayKey);
+        }
+        if (dayKey !== lastMagnesiumResetDate) {
+            setMagnesiumTaken(false);
+            setLastMagnesiumResetDate(dayKey);
+        }
+
+        const locked = isLockoutHour(current.getHours(), lockoutHour) || previewLockout;
+        if (locked && isTimedIn) notifyOnce("bedtime", "Bedtime", "Lockout is on. Time out for the night.");
+
+        if (isTimedIn && !locked && seconds > 0) {
+            setTimers((t) => ({
+                elapsed: t.elapsed + seconds,
+                posture: Math.max(0, t.posture - seconds),
+                water: Math.max(0, t.water - seconds),
+                eye: Math.max(0, t.eye - seconds),
+            }));
+            setDailyLogs((logs) => addMinutes(logs, dayKey, seconds));
+            if (focusState === "running" && !isBreak) {
+                setDailyFocusLogs((logs) => addMinutes(logs, dayKey, seconds));
+            }
+
+            // Reminders fire once when their countdown reaches zero.
+            if (timers.posture > 0 && timers.posture - seconds <= 0) {
+                sendNotification("Posture", `Time to ${posture === "sitting" ? "stand up" : "sit down"}.`);
+            }
+            if (timers.water > 0 && timers.water - seconds <= 0) {
+                sendNotification("Water", "Time for a glass of water.");
+            }
+            if (timers.eye > 0 && timers.eye - seconds <= 0) {
+                sendNotification("Eye rest", "Look at something 20 feet away for 20 seconds.");
+            }
+            if (current.getHours() >= MAGNESIUM_HOUR && !magnesiumTaken) {
+                notifyOnce("magnesium", "Magnesium", "Take your magnesium before bed.");
+            }
+        }
+
+        if (focusState === "running" && seconds > 0) {
+            if (focusTimer > 0 && focusTimer - seconds <= 0) {
+                setFocusState("completed");
+                if (isBreak) sendNotification("Break over", "Back to focus.", "success");
+                else sendNotification("Focus done", "Take a 5-minute break.", "chime");
+            }
+            setFocusTimer((t) => t - seconds);
+        } else if (focusState === "completed" && seconds > 0) {
+            setFocusTimer((t) => t - seconds);
+        }
+    };
+    const tickRef = useRef(tick);
+    tickRef.current = tick;
+
+    useEffect(() => {
+        const id = window.setInterval(() => tickRef.current(), 1000);
+        return () => window.clearInterval(id);
+    }, []);
+
+    // Keep the page behind the lockout from scrolling.
+    useEffect(() => {
+        document.body.classList.toggle("is-locked", lockdownActive);
+        return () => document.body.classList.remove("is-locked");
+    }, [lockdownActive]);
+
     // --- ACTIONS ---
-
-    const handleTimeToggle = () => {
-        const nextState = !isTimedIn;
-        setIsTimedIn(nextState);
-        if (audioEnabled) playChime();
-        if (nextState) {
-            setSessionSeconds(0);
-            setSitStandTimer(currentStandingState === "sitting" ? SITTING_DURATION : STANDING_DURATION);
-            setWaterTimer(waterInterval * 60);
-            setEyeTimer(eyeInterval * 60);
-            setSitStandAlert(false);
-            setWaterAlert(false);
-            setEyeAlert(false);
-            // sendNotification("Session Started", "Screen time monitoring is now active.", "success");
-        } else {
-            setAutoTrackingArmed(false);
-            handleFocusReset();
-            // sendNotification("Session Ended", "Screen time monitoring is deactivated.", "success");
-        }
+    const togglePosture = () => {
+        const next: Posture = posture === "sitting" ? "standing" : "sitting";
+        setPosture(next);
+        setTimers((t) => ({ ...t, posture: next === "sitting" ? SITTING_DURATION : STANDING_DURATION }));
+        if (audioEnabled) playSuccess();
     };
 
-    const toggleStandingState = () => {
-        const nextPose = currentStandingState === "sitting" ? "standing" : "sitting";
-        setCurrentStandingState(nextPose);
-        // Duration alternates: 25 min sitting, 15 min standing
-        setSitStandTimer(nextPose === "sitting" ? SITTING_DURATION : STANDING_DURATION);
-        setSitStandAlert(false);
-        sendNotification(
-            "Posture Change",
-            `${nextPose === "standing" ? "🧍 Stand up" : "🪑 Sit down"} — ${nextPose === "standing" ? "15 min standing" : "25 min sitting"} starts now.`,
-            "success",
-        );
-    };
-
-    const resetTimer = (type: "sitStand" | "water" | "eye") => {
-        if (type === "sitStand") {
-            // Reset to the current pose's allotted duration
-            setSitStandTimer(currentStandingState === "sitting" ? SITTING_DURATION : STANDING_DURATION);
-            setSitStandAlert(false);
-        } else if (type === "water") {
-            setWaterTimer(waterInterval * 60);
-            setWaterAlert(false);
-        } else if (type === "eye") {
-            setEyeTimer(eyeInterval * 60);
-            setEyeAlert(false);
-        }
+    const restartEye = () => {
+        setTimers((t) => ({ ...t, eye: eyeInterval * 60 }));
         if (audioEnabled) playChime();
     };
 
-    const incrementWater = () => {
-        setWaterCount((prev) => prev + 1);
-        resetTimer("water");
+    const logWater = () => {
+        setWaterCount((c) => c + 1);
+        setTimers((t) => ({ ...t, water: waterInterval * 60 }));
+        if (audioEnabled) playChime();
     };
 
-    const dismissMagnesium = () => {
-        setMagnesiumTaken(true);
-        setMagnesiumAlert(false);
-        sendNotification("Magnesium Taken", "Logged supplement intake for today.", "success");
-    };
-
-    const triggerBypass = () => {
-        setLockdownBypassUntil(Date.now() + 15 * 60 * 1000);
-        setTestLockdownActive(false);
-        setLockdownActive(false);
-        sendNotification("Lockout Bypassed", "You have 15 minutes of emergency grace time.", "success");
-    };
-
-    const handleTimeOutAndSleep = () => {
-        setIsTimedIn(false);
+    const toggleMagnesium = () => {
+        setMagnesiumTaken((taken) => {
+            if (!taken && audioEnabled) playSuccess();
+            return !taken;
+        });
     };
 
     const handleFocusClick = () => {
         if (focusState === "idle") {
-            setFocusState("running");
             setIsBreak(false);
             setFocusTimer(FOCUS_DURATION);
+            setFocusState("running");
         } else if (focusState === "running") {
             setFocusState("paused");
         } else if (focusState === "paused") {
             setFocusState("running");
-        } else if (focusState === "completed") {
-            if (!isBreak) {
-                // Focus completed, start break
-                setIsBreak(true);
-                setFocusState("running");
-                setFocusTimer(BREAK_DURATION);
-            } else {
-                // Break completed, start focus
-                setIsBreak(false);
-                setFocusState("running");
-                setFocusTimer(FOCUS_DURATION);
-            }
+        } else {
+            const nextIsBreak = !isBreak;
+            setIsBreak(nextIsBreak);
+            setFocusTimer(nextIsBreak ? BREAK_DURATION : FOCUS_DURATION);
+            setFocusState("running");
         }
         if (audioEnabled) playChime();
     };
 
-    const handleFocusReset = () => {
-        setFocusState("idle");
-        setIsBreak(false);
-        setFocusTimer(FOCUS_DURATION);
-        if (audioEnabled) playChime();
+    const changeWaterInterval = (mins: number) => {
+        setWaterInterval(mins);
+        setTimers((t) => ({ ...t, water: mins * 60 }));
     };
 
-    // --- TIME STRINGS ---
-    const timeString = time.toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hour12: true,
-    });
-    const timeParts = timeString.split(" ");
-    const clockTime = timeParts[0] ?? timeString;
-    const meridiem = timeParts[1] ?? "";
-    const dateString = time.toLocaleDateString([], {
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-    });
-
-    // --- TIMER FORMATTING HELPERS ---
-    const formatTimer = (totalSecs: number) => {
-        const isNegative = totalSecs < 0;
-        const absSecs = Math.abs(totalSecs);
-        const mins = Math.floor(absSecs / 60);
-        const secs = absSecs % 60;
-        return `${isNegative ? "-" : ""}${mins}:${secs.toString().padStart(2, "0")}`;
+    const changeEyeInterval = (mins: number) => {
+        setEyeInterval(mins);
+        setTimers((t) => ({ ...t, eye: mins * 60 }));
     };
 
-    const getPastSevenDays = () => {
-        const days = [];
-        const weekdayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const clearAllLogs = () => {
+        setDailyLogs({});
+        setDailyFocusLogs({});
+        setWaterCount(0);
+        resetFocus();
+    };
 
-        for (let i = 6; i >= 0; i--) {
+    const loadSampleData = () => {
+        const sample = [150, 420, 290, 510, 180, 360, 45];
+        const sampleFocus = [60, 120, 80, 240, 90, 150, 20];
+        const logs: Record<string, number> = {};
+        const focusLogs: Record<string, number> = {};
+        for (let i = 0; i < 7; i++) {
             const d = new Date();
-            d.setDate(d.getDate() - i);
-
-            const year = d.getFullYear();
-            const month = (d.getMonth() + 1).toString().padStart(2, "0");
-            const date = d.getDate().toString().padStart(2, "0");
-            const dateKey = `${year}-${month}-${date}`;
-            const dayName = weekdayNames[d.getDay()];
-
-            days.push({
-                key: dateKey,
-                label: `${dayName}`,
-                rawDate: d,
-            });
+            d.setDate(d.getDate() - (6 - i));
+            logs[getDateKey(d)] = sample[i];
+            focusLogs[getDateKey(d)] = sampleFocus[i];
         }
-        return days;
-    };
-
-    const pastDays = getPastSevenDays();
-    const chartData = pastDays.map((day) => ({
-        ...day,
-        minutes: dailyLogs[day.key] || 0,
-        focusMinutes: dailyFocusLogs[day.key] || 0,
-    }));
-
-    const maxMinutes = Math.max(...chartData.map((d) => Math.max(d.minutes, d.focusMinutes)), 120);
-
-    const formatHrsMins = (totalMins: number) => {
-        const hrs = Math.floor(totalMins / 60);
-        const mins = Math.floor(totalMins % 60);
-        if (hrs === 0) return `${mins}m`;
-        return `${hrs}h ${mins}m`;
+        setDailyLogs(logs);
+        setDailyFocusLogs(focusLogs);
     };
 
     return (
-        <div className="relative min-h-screen bg-[#070709] w-full flex flex-col font-sans select-none overflow-x-hidden">
-            {/* Bedtime Lockdown Enforcer Overlay */}
+        <div className="relative min-h-dvh w-full">
             {lockdownActive && (
                 <LockdownScreen
-                    timeString={timeString}
-                    onBypass={triggerBypass}
-                    onTimeOutAndSleep={handleTimeOutAndSleep}
-                    audioEnabled={audioEnabled}
-                    setAudioEnabled={setAudioEnabled}
+                    now={now}
+                    lockoutHour={lockoutHour}
                     isTimedIn={isTimedIn}
+                    audioEnabled={audioEnabled}
+                    todayMinutes={dailyLogs[todayKey] || 0}
+                    magnesiumDue={!magnesiumTaken}
+                    onTimeOut={timeOutManually}
+                    onTakeMagnesium={() => setMagnesiumTaken(true)}
+                    onExitPreview={previewLockout ? () => setPreviewLockout(false) : undefined}
                 />
             )}
 
-            {/* Main Layout — responsive grid, full viewport height on desktop */}
-            <main className="flex-grow flex flex-col min-h-screen md:h-screen md:overflow-hidden p-3 relative w-full select-none justify-center">
-                {/* Glow backdrop decorative */}
-                <div className="absolute w-[300px] h-[300px] bg-cyan-950/5 rounded-full blur-[100px] top-1/4 left-1/3 pointer-events-none"></div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 w-full max-w-5xl mx-auto items-stretch md:h-full">
-                    {/* Column 1: Clock */}
-                    <div className="glass-panel-light rounded-xl p-3 flex flex-col justify-between relative overflow-hidden min-h-[220px] md:h-full">
-                        {/* Top: Clock & Session toggle */}
-                        <div className="flex justify-between flex-col my-2 gap-10">
-                            <div>
-                                <div className="flex items-end gap-2 font-mono leading-none">
-                                    <div className="text-5xl font-medium text-zinc-100">{clockTime}</div>
-                                    {meridiem ? (
-                                        <div className="text-2xl font-medium uppercase tracking-[0.2em] text-zinc-100">
-                                            {meridiem}
-                                        </div>
-                                    ) : null}
-                                </div>
-                                <div className="text-xl text-zinc-300 font-medium uppercase tracking-wide mt-1">
-                                    {dateString}
-                                </div>
-                            </div>
-                            <div className="flex flex-col gap-3 w-full">
-                                {/* Session toggle */}
-                                <button
-                                    onClick={handleTimeToggle}
-                                    className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all duration-300 cursor-pointer border h-12 ${
-                                        isTimedIn
-                                            ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/40 shadow-[0_0_15px_rgba(16,185,129,0.15)] hover:bg-emerald-500/20"
-                                            : "bg-zinc-950/65 text-zinc-400 border-zinc-800 hover:border-zinc-700 hover:text-zinc-200"
-                                    }`}
-                                >
-                                    <div className="flex items-center gap-2">
-                                        {isTimedIn ? (
-                                            <div className="w-4 flex items-center justify-center">
-                                                <span className="relative flex h-2.5 w-2.5">
-                                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                                                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-                                                </span>
-                                            </div>
-                                        ) : (
-                                            <Play size={12} className="w-4 fill-zinc-400 stroke-zinc-400" />
-                                        )}
-                                        <span>{isTimedIn ? "Timed In" : "Time In"}</span>
-                                    </div>
-                                    {isTimedIn && (
-                                        <span className="font-mono text-zinc-300 font-bold bg-zinc-900/80 px-2 py-0.5 rounded border border-zinc-800">
-                                            {String(Math.floor(sessionSeconds / 3600)).padStart(2, "0")}:
-                                            {String(Math.floor((sessionSeconds % 3600) / 60)).padStart(2, "0")}:
-                                            {String(sessionSeconds % 60).padStart(2, "0")}
-                                        </span>
-                                    )}
-                                </button>
-
-                                {autoTrackingEnabled && (
-                                    <div className="flex items-center justify-between px-2 text-[10px] text-cyan-300/80">
-                                        <span>
-                                            {systemIdleAvailable
-                                                ? `Auto tracking · time out after ${autoTrackingMinutes}m idle`
-                                                : "Auto tracking requires the desktop app"}
-                                        </span>
-                                        {systemIdleAvailable && systemIdleSeconds !== null && (
-                                            <span className="font-mono text-zinc-500">Idle {Math.floor(systemIdleSeconds / 60)}m</span>
-                                        )}
-                                    </div>
-                                )}
-
-                                {/* Focus Pomodoro Button Container */}
-                                <div className="flex gap-2 w-full">
-                                    <button
-                                        onClick={handleFocusClick}
-                                        disabled={!isTimedIn}
-                                        className={`flex-grow flex items-center justify-between px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all duration-300 border h-12 ${
-                                            !isTimedIn
-                                                ? "bg-zinc-900/40 text-zinc-400 border-zinc-800/70 cursor-not-allowed opacity-70"
-                                                : focusState === "running"
-                                                  ? "cursor-pointer bg-indigo-500/10 text-indigo-400 border-indigo-500/40 shadow-[0_0_15px_rgba(99,102,241,0.15)] hover:bg-indigo-500/20"
-                                                  : focusState === "paused"
-                                                    ? "cursor-pointer bg-amber-500/10 text-amber-400 border-amber-500/40 hover:bg-amber-500/20"
-                                                    : focusState === "completed"
-                                                      ? "cursor-pointer bg-rose-500/10 text-rose-400 border-rose-500/40 animate-pulse hover:bg-rose-500/20 shadow-[0_0_15px_rgba(244,63,94,0.15)]"
-                                                      : "cursor-pointer bg-zinc-950/65 text-zinc-400 border-zinc-800 hover:border-zinc-700 hover:text-zinc-200"
-                                        }`}
-                                    >
-                                        <div className="flex items-center gap-2">
-                                            {focusState === "running" ? (
-                                                <Pause size={12} className="w-4 fill-indigo-400 stroke-indigo-400" />
-                                            ) : focusState === "paused" ? (
-                                                <Play
-                                                    size={12}
-                                                    className="w-4 fill-amber-400 stroke-amber-400 animate-pulse"
-                                                />
-                                            ) : focusState === "completed" ? (
-                                                <Play
-                                                    size={12}
-                                                    className="w-4 fill-rose-400 stroke-rose-400 animate-pulse"
-                                                />
-                                            ) : (
-                                                <span className="text-xs w-4">🎯</span>
-                                            )}
-                                            <span>
-                                                {focusState === "idle"
-                                                    ? "Start Focus"
-                                                    : focusState === "running"
-                                                      ? isBreak
-                                                          ? "Break Active"
-                                                          : "Focusing"
-                                                      : focusState === "paused"
-                                                        ? "Paused"
-                                                        : isBreak
-                                                          ? "Take Focus"
-                                                          : "Take Break"}
-                                            </span>
-                                        </div>
-                                        {focusState !== "idle" && (
-                                            <span className="font-mono text-zinc-300 font-bold bg-zinc-900/80 px-2 py-0.5 rounded border border-zinc-800">
-                                                {formatTimer(focusTimer)}
-                                            </span>
-                                        )}
-                                    </button>
-
-                                    {/* Reset Button when timer is active */}
-                                    {focusState !== "idle" && (
-                                        <button
-                                            onClick={handleFocusReset}
-                                            disabled={!isTimedIn}
-                                            title="Reset Focus Timer"
-                                            className={`px-3 py-2.5 rounded-xl border transition-all duration-300 flex items-center justify-center h-12 ${
-                                                !isTimedIn
-                                                    ? "border-zinc-800/60 bg-zinc-950/40 text-zinc-700 cursor-not-allowed opacity-50"
-                                                    : "cursor-pointer border-zinc-800 bg-zinc-950/65 text-zinc-400 hover:text-rose-400 hover:border-rose-500/40 hover:bg-rose-500/5"
-                                            }`}
-                                        >
-                                            <RotateCcw size={12} />
-                                        </button>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Column 2: Stats & Chart */}
-                    <div className="glass-panel-light rounded-xl p-3 flex flex-col justify-between relative overflow-hidden min-h-[300px] md:h-full">
-                        {/* Mid: Today's screen time */}
-                        <div>
-                            <div className="text-xs text-zinc-500 font-bold uppercase tracking-wider">
-                                Today's Screen Time
-                            </div>
-                            <div className="text-2xl font-black text-cyan-400 font-mono mt-1 animate-pulse-slow">
-                                {(() => {
-                                    const minutes = dailyLogs[getTodayKey()] || 0;
-                                    const totalSeconds = Math.round(minutes * 60);
-                                    const hrs = Math.floor(totalSeconds / 3600);
-                                    const mins = Math.floor((totalSeconds % 3600) / 60);
-                                    const secs = totalSeconds % 60;
-                                    return hrs > 0 ? `${hrs}h ${mins}m ${secs}s` : `${mins}m ${secs}s`;
-                                })()}
-                            </div>
-                        </div>
-
-                        {/* Bottom: 7-day chart */}
-                        <div className="flex-grow flex flex-col mt-6 min-h-[220px]">
-                            <div className="flex items-center justify-between text-[0.8rem] text-zinc-500 font-medium mb-2">
-                                <span>7-Day History</span>
-                                <div className="flex items-center gap-3">
-                                    <span className="flex items-center gap-1">
-                                        <span className="inline-block w-2 h-2 rounded-sm bg-cyan-400 opacity-80"></span>
-                                        <span className="text-[0.65rem] text-zinc-500 font-bold uppercase tracking-wider">
-                                            Screen
-                                        </span>
-                                    </span>
-                                    <span className="flex items-center gap-1">
-                                        <span className="inline-block w-2 h-2 rounded-sm bg-indigo-400"></span>
-                                        <span className="text-[0.65rem] text-zinc-500 font-bold uppercase tracking-wider">
-                                            Focus
-                                        </span>
-                                    </span>
-                                </div>
-                            </div>
-                            <div className="flex-grow w-full relative">
-                                <svg viewBox="0 0 200 100" className="w-full h-full text-zinc-600">
-                                    <defs>
-                                        <linearGradient id="screenGrad" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="0%" stopColor="#22d3ee" stopOpacity="1" />
-                                            <stop offset="100%" stopColor="#0284c7" stopOpacity="0.8" />
-                                        </linearGradient>
-                                        <linearGradient id="focusGrad" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="0%" stopColor="#a78bfa" stopOpacity="1" />
-                                            <stop offset="100%" stopColor="#6366f1" stopOpacity="0.8" />
-                                        </linearGradient>
-                                        <filter id="focusGlow">
-                                            <feGaussianBlur stdDeviation="1.5" result="blur" />
-                                            <feMerge>
-                                                <feMergeNode in="blur" />
-                                                <feMergeNode in="SourceGraphic" />
-                                            </feMerge>
-                                        </filter>
-                                    </defs>
-                                    {chartData.map((d, index) => {
-                                        const groupWidth = 24;
-                                        const spacing = (180 - groupWidth * 7) / 6;
-                                        const groupX = 10 + index * (groupWidth + spacing);
-                                        const halfW = groupWidth / 2 - 1;
-                                        const barHeight = maxMinutes > 0 ? (d.minutes / maxMinutes) * 78 : 2;
-                                        const focusBarHeight = maxMinutes > 0 ? (d.focusMinutes / maxMinutes) * 78 : 0;
-                                        const screenY = 82 - barHeight;
-                                        const focusY = 82 - focusBarHeight;
-                                        const isToday = index === 6;
-
-                                        return (
-                                            <g key={d.key}>
-                                                {/* Screen time bar */}
-                                                <rect
-                                                    x={groupX}
-                                                    y={screenY}
-                                                    width={halfW}
-                                                    height={Math.max(barHeight, 2)}
-                                                    rx="1.5"
-                                                    ry="1.5"
-                                                    fill={isToday ? "url(#screenGrad)" : "rgba(34,211,238,0.35)"}
-                                                    stroke={isToday ? "rgba(34,211,238,0.5)" : "rgba(34,211,238,0.3)"}
-                                                    strokeWidth="0.4"
-                                                    className="transition-all duration-300 hover:brightness-125"
-                                                >
-                                                    <title>{`${d.label}: ${formatHrsMins(d.minutes)} screen`}</title>
-                                                </rect>
-                                                {/* Focus time bar */}
-                                                {focusBarHeight > 0 && (
-                                                    <rect
-                                                        x={groupX + halfW + 2}
-                                                        y={focusY}
-                                                        width={halfW}
-                                                        height={Math.max(focusBarHeight, 2)}
-                                                        rx="1.5"
-                                                        ry="1.5"
-                                                        fill={isToday ? "url(#focusGrad)" : "rgba(99,102,241,0.35)"}
-                                                        stroke={
-                                                            isToday ? "rgba(167,139,250,0.5)" : "rgba(99,102,241,0.3)"
-                                                        }
-                                                        strokeWidth="0.4"
-                                                        filter={isToday ? "url(#focusGlow)" : undefined}
-                                                        className="transition-all duration-300 hover:brightness-125"
-                                                    >
-                                                        <title>{`${d.label}: ${formatHrsMins(d.focusMinutes)} focus`}</title>
-                                                    </rect>
-                                                )}
-                                                {/* Empty focus bar placeholder so days without focus show a ghost */}
-                                                {focusBarHeight === 0 && (
-                                                    <rect
-                                                        x={groupX + halfW + 2}
-                                                        y={80}
-                                                        width={halfW}
-                                                        height={2}
-                                                        rx="1"
-                                                        ry="1"
-                                                        fill="rgba(99,102,241,0.12)"
-                                                    />
-                                                )}
-                                                <text
-                                                    x={groupX + groupWidth / 2}
-                                                    y={92}
-                                                    textAnchor="middle"
-                                                    className={`font-sans text-[0.5rem] font-bold ${isToday ? "fill-cyan-400" : "fill-zinc-500"}`}
-                                                >
-                                                    {d.label.substring(0, 1)}
-                                                </text>
-                                            </g>
-                                        );
-                                    })}
-                                </svg>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Column 3: Health Timers */}
-                    <div className="glass-panel-light rounded-xl p-3 flex flex-col justify-between min-h-[300px] md:h-full">
-                        <div className="text-xs text-zinc-500 font-bold uppercase tracking-wider">Reminders</div>
-
-                        <div className="space-y-1.5 flex-grow flex flex-col justify-start mt-4">
-                            {/* Pose Switch Card */}
-                            <button
-                                onClick={toggleStandingState}
-                                className={`w-full flex items-center justify-between p-2 rounded-lg border text-left transition-all duration-300 cursor-pointer ${
-                                    sitStandAlert
-                                        ? "bg-amber-500/10 border-amber-500/50 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.15)] animate-pulse"
-                                        : "bg-zinc-950/65 border-zinc-800 hover:border-zinc-700 text-zinc-300"
-                                }`}
-                            >
-                                <div className="flex items-center gap-2">
-                                    <span className="text-sm w-4 text-center">
-                                        {currentStandingState === "sitting" ? "🪑" : "🧍"}
-                                    </span>
-                                    <div>
-                                        <div className="text-xs text-zinc-500 font-bold uppercase tracking-wider leading-none">
-                                            Posture change
-                                        </div>
-                                        <div className="text-xs font-bold mt-0.5 capitalize">
-                                            {currentStandingState}
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="font-mono text-xs font-bold bg-zinc-900/80 px-2 py-0.5 rounded border border-zinc-800">
-                                    {formatTimer(sitStandTimer)}
-                                </div>
-                            </button>
-
-                            {/* Eye Rest Card */}
-                            <button
-                                onClick={() => resetTimer("eye")}
-                                className={`w-full flex items-center justify-between p-2 rounded-lg border text-left transition-all duration-300 cursor-pointer ${
-                                    eyeAlert
-                                        ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.15)] animate-pulse"
-                                        : "bg-zinc-950/65 border-zinc-800 hover:border-zinc-700 text-zinc-300"
-                                }`}
-                            >
-                                <div className="flex items-center gap-2">
-                                    <span className="text-xs w-4 text-center">👁️</span>
-                                    <div>
-                                        <div className="text-xs text-zinc-500 font-bold uppercase tracking-wider leading-none">
-                                            Eye Rest
-                                        </div>
-                                        <div className="text-xs font-bold mt-0.5">20-20-20 break</div>
-                                    </div>
-                                </div>
-                                <div className="font-mono text-xs font-bold bg-zinc-900/80 px-2 py-0.5 rounded border border-zinc-800">
-                                    {formatTimer(eyeTimer)}
-                                </div>
-                            </button>
-
-                            {/* Hydration Tracker Card */}
-                            <button
-                                onClick={incrementWater}
-                                className={`w-full flex items-center justify-between p-2 rounded-lg border text-left transition-all duration-300 cursor-pointer ${
-                                    waterAlert
-                                        ? "bg-cyan-500/10 border-cyan-500/50 text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.15)] animate-pulse"
-                                        : "bg-zinc-950/65 border-zinc-800 text-zinc-300"
-                                }`}
-                            >
-                                <div className="flex items-center gap-2">
-                                    <span className="text-sm w-4 text-center">💧</span>
-                                    <div>
-                                        <div className="text-xs text-zinc-500 font-bold uppercase tracking-wider leading-none">
-                                            Hydration
-                                        </div>
-                                        <div className="text-xs font-bold mt-0.5">Drink water ({waterCount})</div>
-                                    </div>
-                                </div>
-                                <div className="font-mono text-xs font-bold bg-zinc-900/80 px-2 py-0.5 rounded border border-zinc-800">
-                                    {formatTimer(waterTimer)}
-                                </div>
-                            </button>
-
-                            {/* Magnesium reminder (conditional) */}
-                            {magnesiumAlert ? (
-                                <button
-                                    onClick={dismissMagnesium}
-                                    className="w-full flex items-center justify-between p-2 rounded-lg border bg-purple-500/10 border-purple-500/50 text-purple-300 shadow-[0_0_12px_rgba(168,85,247,0.15)] animate-bounce cursor-pointer transition-all"
-                                >
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-xs w-4 text-center">💊</span>
-                                        <div>
-                                            <div className="text-xs text-purple-400 font-bold uppercase tracking-wider leading-none">
-                                                Magnesium
-                                            </div>
-                                            <div className="text-xs font-bold mt-0.5">Tap to confirm</div>
-                                        </div>
-                                    </div>
-                                </button>
-                            ) : (
-                                <div
-                                    className={`w-full flex items-center justify-between p-2 rounded-lg border text-left transition-all duration-300 cursor-not-allowed ${
-                                        magnesiumTaken
-                                            ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.15)]"
-                                            : "bg-zinc-900/40 border-zinc-800/70 text-zinc-400 opacity-80"
-                                    }`}
-                                >
-                                    <div className="flex items-center gap-2 flex-grow text-left outline-none">
-                                        <span className="text-xs w-4 text-center opacity-70">💊</span>
-                                        <div>
-                                            <div
-                                                className={`text-xs font-bold uppercase tracking-wider leading-none ${
-                                                    magnesiumTaken ? "text-emerald-400" : "text-zinc-500"
-                                                }`}
-                                            >
-                                                Magnesium
-                                            </div>
-                                            <div className="text-xs font-bold mt-0.5">
-                                                {magnesiumTaken ? "Taken" : "Take at"}
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div
-                                        className={`font-mono text-xs font-bold px-2 py-0.5 rounded border ${
-                                            magnesiumTaken
-                                                ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
-                                                : "bg-zinc-950/70 border-zinc-800/80 text-zinc-500"
-                                        }`}
-                                    >
-                                        {magnesiumTaken ? "--" : "11pm"}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* Bottom util strip (hidden behind Settings button) */}
-                        <div className="mt-2 pt-1.5 border-t border-zinc-800/40 flex flex-col gap-1.5 relative">
-                            {isSettingsOpen && (
-                                <div className="grid grid-cols-2 gap-1.5 pt-1.5 border-t border-zinc-800/30 text-[10px] z-10 absolute top-0 left-0 w-full bg-zinc-900/90 backdrop-blur-md p-2 rounded-b-lg -translate-y-full transition-transform duration-300">
-                                    {/* Sounds Toggle */}
-                                    <button
-                                        onClick={() => setAudioEnabled(!audioEnabled)}
-                                        className={`flex items-center justify-between px-2 py-1.5 rounded border transition-all cursor-pointer font-bold ${
-                                            audioEnabled
-                                                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
-                                                : "bg-zinc-900/60 border-zinc-800 text-zinc-500 hover:text-zinc-300"
-                                        }`}
-                                        title={audioEnabled ? "Mute sounds" : "Enable sound alerts"}
-                                    >
-                                        <div className="flex items-center gap-1">
-                                            {audioEnabled ? <Volume2 size={11} /> : <VolumeX size={11} />}
-                                            <span>Sounds</span>
-                                        </div>
-                                        <span className="text-[10px] opacity-80">{audioEnabled ? "ON" : "OFF"}</span>
-                                    </button>
-
-                                    {/* Notifications Toggle */}
-                                    <button
-                                        onClick={
-                                            notificationsEnabled
-                                                ? () => setNotificationsEnabled(false)
-                                                : requestNotificationPermission
-                                        }
-                                        className={`flex items-center justify-between px-2 py-1.5 rounded border transition-all cursor-pointer font-bold ${
-                                            notificationsEnabled
-                                                ? "bg-indigo-500/10 border-indigo-500/30 text-indigo-400"
-                                                : "bg-zinc-900/60 border-zinc-800 text-zinc-500 hover:text-zinc-300"
-                                        }`}
-                                        title={
-                                            notificationsEnabled
-                                                ? "Disable desktop notifications"
-                                                : "Enable desktop notifications"
-                                        }
-                                    >
-                                        <div className="flex items-center gap-1">
-                                            {notificationsEnabled ? <Bell size={11} /> : <BellOff size={11} />}
-                                            <span>Alerts</span>
-                                        </div>
-                                        <span className="text-[10px] opacity-80 font-mono">
-                                            {notificationsEnabled ? "ON" : "OFF"}
-                                        </span>
-                                    </button>
-
-                                    {/* Computer-wide Windows idle detection */}
-                                    <button
-                                        onClick={() => {
-                                            setAutoTrackingEnabled(!autoTrackingEnabled);
-                                            setAutoTrackingArmed(true);
-                                        }}
-                                        disabled={!systemIdleAvailable && !autoTrackingEnabled}
-                                        className={`col-span-2 flex items-center justify-between px-2 py-1.5 rounded border transition-all font-bold ${
-                                            autoTrackingEnabled
-                                                ? "bg-cyan-500/10 border-cyan-500/30 text-cyan-300 cursor-pointer"
-                                                : systemIdleAvailable
-                                                  ? "bg-zinc-900/60 border-zinc-800 text-zinc-500 hover:text-zinc-300 cursor-pointer"
-                                                  : "bg-zinc-900/30 border-zinc-800/60 text-zinc-600 cursor-not-allowed"
-                                        }`}
-                                        title="Use computer-wide keyboard and mouse activity to start and stop tracking"
-                                    >
-                                        <span>Auto tracking</span>
-                                        <span className="font-mono text-[10px]">
-                                            {autoTrackingEnabled ? "ON" : systemIdleAvailable ? "OFF" : "DESKTOP ONLY"}
-                                        </span>
-                                    </button>
-
-                                    {autoTrackingEnabled && systemIdleAvailable && (
-                                        <label className="col-span-2 flex items-center justify-between px-2 py-1.5 rounded border border-zinc-800 bg-zinc-900/60 text-zinc-400 font-bold">
-                                            <span>Auto time out</span>
-                                            <select
-                                                value={autoTrackingMinutes}
-                                                onChange={(event) => setAutoTrackingMinutes(Number(event.target.value))}
-                                                className="bg-zinc-950 border border-zinc-800 rounded px-1 py-0.5 text-[10px] text-zinc-300 outline-none"
-                                            >
-                                                <option value={5}>5 min idle</option>
-                                                <option value={10}>10 min idle</option>
-                                                <option value={15}>15 min idle</option>
-                                                <option value={30}>30 min idle</option>
-                                            </select>
-                                        </label>
-                                    )}
-
-                                    {/* Mock Data Button */}
-                                    <button
-                                        onClick={() => {
-                                            const mockLogs: Record<string, number> = {};
-                                            const mockFocusLogs: Record<string, number> = {};
-                                            pastDays.forEach((day, index) => {
-                                                const mockTimes = [150, 420, 290, 510, 180, 360, 45];
-                                                const mockFocusTimes = [60, 120, 80, 240, 90, 150, 20];
-                                                mockLogs[day.key] = mockTimes[index % mockTimes.length];
-                                                mockFocusLogs[day.key] = mockFocusTimes[index % mockFocusTimes.length];
-                                            });
-                                            setDailyLogs(mockLogs);
-                                            setDailyFocusLogs(mockFocusLogs);
-                                        }}
-                                        className="flex items-center justify-between px-2 py-1.5 rounded border border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-cyan-400 hover:border-cyan-500/30 hover:bg-cyan-500/10 transition-all cursor-pointer font-bold"
-                                        title="Populate test data for 7-day history"
-                                    >
-                                        <div className="flex items-center gap-1">
-                                            <Sparkles size={11} className="text-cyan-400" />
-                                            <span>Mock</span>
-                                        </div>
-                                        <span className="text-[10px] text-zinc-500 font-mono">DATA</span>
-                                    </button>
-
-                                    {/* Reset Button */}
-                                    <button
-                                        onClick={() => {
-                                            if (window.confirm("Clear all logs?")) {
-                                                setDailyLogs({});
-                                                setDailyFocusLogs({});
-                                                setWaterCount(0);
-                                                setFocusState("idle");
-                                                setIsBreak(false);
-                                                setFocusTimer(FOCUS_DURATION);
-                                                window.localStorage.removeItem("dt_corner_daily_logs");
-                                                window.localStorage.removeItem("dt_corner_focus_logs");
-                                                window.localStorage.removeItem("dt_corner_water_count");
-                                            }
-                                        }}
-                                        className="flex items-center justify-between px-2 py-1.5 rounded border border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-rose-400 hover:border-rose-500/30 hover:bg-rose-500/10 transition-all cursor-pointer font-bold"
-                                        title="Reset all tracked logs and counts"
-                                    >
-                                        <div className="flex items-center gap-1">
-                                            <RotateCcw size={11} className="text-rose-400" />
-                                            <span>Reset</span>
-                                        </div>
-                                        <span className="text-[10px] text-rose-500/70 font-mono font-normal">ALL</span>
-                                    </button>
-                                </div>
-                            )}
-                            <button
-                                onClick={() => setIsSettingsOpen(!isSettingsOpen)}
-                                className="w-full flex items-center justify-between px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40 transition-all cursor-pointer"
-                                title="Toggle settings menu"
-                            >
-                                <div className="flex items-center gap-1.5">
-                                    <Settings
-                                        size={12}
-                                        className={`transition-transform duration-300 ${isSettingsOpen ? "rotate-90 text-cyan-400" : "text-zinc-500"}`}
-                                    />
-                                    <span>Settings</span>
-                                </div>
-                                <span className="text-[10px] text-zinc-500 font-mono">
-                                    {isSettingsOpen ? "▼ Hide" : "▲ Show"}
-                                </span>
-                            </button>
-                        </div>
-                    </div>
+            <main
+                inert={lockdownActive}
+                className="flex min-h-dvh w-full items-start justify-center p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:items-center sm:p-4 strip:p-3 tall:items-stretch"
+            >
+                <h1 className="sr-only">DT Corner</h1>
+                <div className="grid w-full max-w-3xl grid-cols-1 gap-3 sm:grid-cols-2 wide:h-[min(calc(100dvh-2rem),46rem)] wide:max-w-6xl wide:grid-cols-[1.1fr_1fr_1fr] wide:grid-rows-[minmax(0,1fr)] strip:h-[calc(100dvh-1.5rem)] tall:h-[calc(100dvh-2rem)] tall:max-w-4xl tall:grid-rows-[minmax(0,1.2fr)_minmax(0,1fr)]">
+                <ClockCard
+                    now={now}
+                    lockoutHour={lockoutHour}
+                    isTimedIn={isTimedIn}
+                    sessionSeconds={timers.elapsed}
+                    isAutoPaused={autoPausedAt !== null && !isTimedIn}
+                    focusState={focusState}
+                    isBreak={isBreak}
+                    focusTimer={focusTimer}
+                    autoTracking={autoTrackingEnabled ? { available: systemIdleAvailable, minutes: autoTrackingMinutes } : null}
+                    onToggleSession={() => (isTimedIn ? timeOutManually() : timeIn("manual"))}
+                    onFocusClick={handleFocusClick}
+                    onFocusReset={() => {
+                        resetFocus();
+                        if (audioEnabled) playChime();
+                    }}
+                    onOpenSettings={() => setIsSettingsOpen(true)}
+                    className="sm:col-span-2 wide:col-span-1"
+                />
+                <WeekCard now={now} dailyLogs={dailyLogs} dailyFocusLogs={dailyFocusLogs} />
+                <RemindersCard
+                    now={now}
+                    isTimedIn={isTimedIn}
+                    posture={posture}
+                    postureSeconds={timers.posture}
+                    eyeSeconds={timers.eye}
+                    waterSeconds={timers.water}
+                    waterCount={waterCount}
+                    magnesiumTaken={magnesiumTaken}
+                    onTogglePosture={togglePosture}
+                    onRestartEye={restartEye}
+                    onLogWater={logWater}
+                    onToggleMagnesium={toggleMagnesium}
+                />
                 </div>
             </main>
+
+            <SettingsSheet
+                open={isSettingsOpen}
+                onClose={() => setIsSettingsOpen(false)}
+                audioEnabled={audioEnabled}
+                onAudioChange={setAudioEnabled}
+                notificationsEnabled={notificationsEnabled}
+                notificationError={notificationError}
+                onNotificationsChange={(on) => (on ? void requestNotificationPermission() : setNotificationsEnabled(false))}
+                autoTrackingAvailable={systemIdleAvailable}
+                autoTrackingEnabled={autoTrackingEnabled}
+                onAutoTrackingChange={(on) => {
+                    setAutoTrackingEnabled(on);
+                    setAutoTrackingArmed(true);
+                }}
+                autoTrackingMinutes={autoTrackingMinutes}
+                onAutoTrackingMinutesChange={setAutoTrackingMinutes}
+                waterInterval={waterInterval}
+                onWaterIntervalChange={changeWaterInterval}
+                eyeInterval={eyeInterval}
+                onEyeIntervalChange={changeEyeInterval}
+                lockoutHour={lockoutHour}
+                onLockoutHourChange={setLockoutHour}
+                onClearLogs={clearAllLogs}
+                onLoadSampleData={loadSampleData}
+                onPreviewLockout={() => {
+                    setIsSettingsOpen(false);
+                    setPreviewLockout(true);
+                }}
+            />
         </div>
     );
 }

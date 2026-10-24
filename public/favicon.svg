@@ -1,19 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
-    <defs>
-        <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#22d3ee" />
-            <stop offset="100%" stop-color="#0284c7" />
-        </linearGradient>
-        <linearGradient id="indigoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#c084fc" />
-            <stop offset="100%" stop-color="#6366f1" />
-        </linearGradient>
-    </defs>
-    
-    <!-- Outer corner path (representing the "Carry Corner" frame) -->
-    <path d="M 6 26 L 6 14 C 6 9.58 9.58 6 14 6 L 26 6" stroke="url(#cyanGrad)" stroke-width="4" stroke-linecap="round" />
-    
-    <!-- Inner concentric rings/target (representing the focus & screen tracking) -->
-    <circle cx="19" cy="19" r="6" stroke="url(#indigoGrad)" stroke-width="3" />
-    <circle cx="19" cy="19" r="2" fill="#22d3ee" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="dtf-sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#262a63"/><stop offset=".58" stop-color="#a8558a"/><stop offset="1" stop-color="#ffa070"/>
+    </linearGradient>
+    <clipPath id="dtf-clip"><rect width="64" height="64" rx="15"/></clipPath>
+  </defs>
+  <g clip-path="url(#dtf-clip)">
+    <rect width="64" height="64" fill="url(#dtf-sky)"/>
+    <circle cx="41" cy="35" r="11" fill="#ffe2b0"/>
+    <path d="M0 46 13 39 25 44 39 35 51 41 64 36V64H0Z" fill="#0b1020"/>
+  </g>
+  <path d="M14 52V23a9 9 0 0 1 9-9h27" stroke="#eef0f7" stroke-width="7" stroke-linecap="round" fill="none"/>
 </svg>
